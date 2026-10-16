@@ -1,0 +1,9 @@
+# Wave 06 — validation, deploy and assessment handoff
+
+**Read:** `AGENTS.md`, this wave, latest handoff, `ACCEPTANCE.md`. Do not expand feature scope.
+
+Run lint, typecheck, unit/integration tests, production build, Playwright smoke scenarios. Fix defects, not cosmetic rewrites. E2E: select tickets; see hold disappear from second independent cart; same checkout URL opens on second context; price up blocks until acknowledged, down shows good news; countdown synchronization/developer shortening; existing tab expiry redirects event and releases inventory; **fresh navigation** to expired link recovers when possible and redirects event when not; transient payment retries at most 3; definitive decline; concurrent completion creates one order; initiator confirmation refreshes, other device goes home; revisiting completed checkout goes home. Exercise race at exact expiration boundary.
+
+Write repo `README.md`: setup, `.env.example`, architecture diagram, API surface, state transition table, reservation/processing/metadata TTL distinction, Redis atomicity strategy, cross-device behavior, SSR-before-hydration judgment, realistic synthetic catalog caveat, telemetry event names (`checkout_created`, `checkout_resumed`, `hold_expired`, `recovered`, `price_changed`, `price_acknowledged`, `payment_attempted`, `checkout_completed`, `checkout_failed`) with session/surface correlation, tradeoffs, future work and concise reviewer walkthrough. Explain that no actual inventory/payment/auth exists, and confirmation capability is demo-grade. Ensure no secrets in Git. Create GitHub repo/deploy Vercel only with appropriate account authorization; otherwise leave exact commands and unresolved prerequisites. Never claim tests/deployment passed unless actually verified.
+
+Write final `handoffs/06-validation-delivery.md` including URL(s), test results, known issues, and what the candidate should review before submitting. Stop.

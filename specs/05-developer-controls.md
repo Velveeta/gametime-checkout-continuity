@@ -1,0 +1,9 @@
+# Wave 05 — synchronized developer scenarios
+
+**Read:** `AGENTS.md`, this wave, latest handoff.
+
+Implement a shared developer-controls Client Component: desktop trigger labeled **Developer menu** opening Radix/shadcn Popover; mobile meatball `ellipsis` trigger opening right-side shadcn Sheet (responsive CSS; same actions). Accessible controls and clear DEMO label. Server-backed mutations via guarded JSON endpoints/service methods, not local-only state; invalidate TanStack Query after mutations, other clients pick up through polling. Include: increase total, decrease total, expire hold now, change hold deadline relative to **server** time (1–30 min slider), simulate next payment success, transient timeout, definitive decline, clear payment simulation, and guarded reset of demo inventory/catalog state. Show current shared scenario config/attempt count and toast feedback. Mutations are authoritative in Redis, versioned and atomic; deadline change cannot revive expired/sold inventory without new reservation. Do not let arbitrary public users affect unrelated sessions; use demo-mode gating and session-scoped controls, document shared-demo limitations. Destructive reset requires confirmation and must not run automatically.
+
+Payment scenario selection must be shared across devices for same session and consumed deterministically per attempt. Avoid a global switch accidentally changing all carts. Provide scenario controls only where logically valid; explain disabled controls. Developer controls should be omitted or inaccessible when demo mode is disabled.
+
+**Tests:** desktop popover/mobile side drawer, server deadline update reflected across two clients without refresh, both price directions, payment timeout/decline, expiration and reset guards. Handoff `handoffs/05-developer-controls.md`.
