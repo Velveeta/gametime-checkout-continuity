@@ -1,0 +1,12 @@
+# Wave 01 handoff
+
+- **Commit:** `d2f54ba762e6864a204247ff167e103f5b99a870` (implementation); handoff committed separately. Local git only, no GitHub push.
+- **Delivered:**
+  - Four immutable, explicitly simulated future events / 16 listings with assigned seats, GA pools, quantity constraints and synthetic per-ticket fees (`src/infrastructure/catalog/`).
+  - Selection/quote validation, `CatalogService` reads/reservations, atomic Redis inventory adapter and reusable Lua core.
+  - Real-Redis concurrency/expiry tests, CI setup, `docs/INVENTORY.md` and README instructions.
+- **Contracts added/changed:** `Listing` adds `feePerTicket` and `quantityRules`; `CatalogRepository` adds list methods; `RESERVATION_CONFLICT` error added. `src/application/inventory-contracts.ts` defines reservation/sale primitives, owner availability, counts, and a demo-reset contract (no reset implementation). Existing checkout service contracts preserved.
+- **Validation:** `npm ci` passed; `npm run check` passed: lint (zero warnings), strict typecheck, 54/54 unit/contract tests, 18/18 integration tests against real Redis 6.2.14, production Next build. Tests establish one winner among 24 competing carts, fixed-deadline replay, expiry/reacquisition fencing, GA/fragmented-seat handling, seed safety and conservation. Integration uses REDIS_SERVER/REDIS_CLI binary paths; macOS instructions use Homebrew. Audit: 5 known ESLint-chain dev findings; production audit 0. Remote CI not run.
+- **Known limitations:** No checkout orchestration, HTTP/UI, payment or order creation. Upstash SDK compiles but hosted transport was not credential-tested. Event JSON aggregates scan retained history; no pruning/scale claim. Seed prices are not live repricing authority.
+- **Next wave:** With approval, read `specs/02-checkout-domain.md`, AGENTS and this handoff. Compose `INVENTORY_LUA_CORE` with session/order mutations atomically; never call reserve/sale then save session/order separately. Add completion claim, locked quote/attempt and processing protection. Current sale primitive checks only live hold/owner; later composition must enforce checkout/capability invariants.
+- **Decisions/deviations:** Event-scoped aggregates, five-minute server-owned default holds, deterministic contiguous selection, no automatic partial fulfillment. Owner holds are separate from purchasable stock. Wave 01 explicitly requires Redis, so Upstash SDK added now; no scope deviation.
