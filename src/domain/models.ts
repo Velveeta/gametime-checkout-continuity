@@ -26,6 +26,9 @@ export interface Listing {
   readonly eventId: EventId;
   readonly allocation: SeatAllocation;
   readonly unitPrice: Cents;
+  /** Explicit synthetic per-ticket fee; quote fees scale with selected quantity. */
+  readonly feePerTicket: Cents;
+  readonly quantityRules: { readonly min: number; readonly max: number; readonly increment: number };
   readonly currency: Currency;
   readonly version: Version;
 }

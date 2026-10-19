@@ -6,12 +6,14 @@ import type { Instant, Version } from "../domain/values";
 export interface Clock { now(): Instant }
 
 export interface CatalogRepository {
+  listEvents(): Promise<readonly Event[]>;
+  listListings(eventId: EventId): Promise<readonly Listing[]>;
   getEvent(id: EventId): Promise<Event | null>;
   getListing(id: ListingId): Promise<Listing | null>;
 }
 
 export interface Inventory {
-  /** Authoritative availability at serverNow; never counts expired holds. */
+  /** Authoritative availability at serverNow; excludes live holds and sold units. */
   getAvailability(listingId: ListingId): Promise<{
     readonly available: readonly SeatAllocation[];
     readonly version: Version;

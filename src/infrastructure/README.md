@@ -1,6 +1,10 @@
 # Infrastructure boundary
 
-No Redis adapter or in-memory substitute exists in Wave 00. Implement application
-ports here in later waves. Use atomic Redis operations with server time; keep
-clients and environment access out of domain/application. Validate required
-credentials through `src/lib/env.ts` before constructing future adapters.
+`catalog/` contains validated, deeply frozen fictional seed data and its read
+adapter. `redis/` implements inventory persistence with Upstash-compatible EVAL.
+It has no checkout orchestrator or memory-backed substitute.
+
+`client.ts` is a server-only factory; importing the app never connects or seeds.
+`inventory-lua.ts` exports write-free functions for later composition in the
+checkout repository's atomic session/reservation/order commands. See
+`docs/INVENTORY.md` before integrating those functions into later waves.
