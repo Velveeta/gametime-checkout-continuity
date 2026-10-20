@@ -197,6 +197,46 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
       'COMPLETED',
     );
   });
+  it('correlates fresh navigation telemetry without polling writes or hold extension', async () => {
+    const test = setup();
+    const view = await test.create();
+    const app = new CheckoutApplication({
+      ...test.deps,
+      telemetrySurface: 'ssr',
+    });
+    const commandCount = test.model.commands.length;
+    const entered = success(
+      await app.enter({
+        sessionId: view.session.id,
+        intent: 'FRESH_NAVIGATION',
+        recoveryIdempotencyKey: 'navigation',
+      }),
+    );
+
+    expect(entered.kind).toBe('RENDER');
+    expect(test.analytics.filter((e) => e.name === 'checkout_resumed')).toEqual(
+      [
+        expect.objectContaining({
+          sessionId: view.session.id,
+          surface: 'ssr',
+          at: view.serverNow,
+        }),
+      ],
+    );
+    await app.read(view.session.id);
+    await app.enter({
+      sessionId: view.session.id,
+      intent: 'MOUNTED_REFRESH',
+      recoveryIdempotencyKey: 'poll',
+    });
+    expect(
+      test.analytics.filter((e) => e.name === 'checkout_resumed'),
+    ).toHaveLength(1);
+    expect(test.model.commands).toHaveLength(commandCount);
+    expect(
+      success(await app.read(view.session.id)).session.reservationExpiresAt,
+    ).toBe(view.session.reservationExpiresAt);
+  });
   it('getSession/read project expiry without writes, recovery or hold extension', async () => {
     const test = setup();
     const created = await test.create();

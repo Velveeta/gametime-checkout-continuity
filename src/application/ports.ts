@@ -58,7 +58,8 @@ export interface Payment {
 }
 
 export type AnalyticsEvent = {
-  readonly name: CheckoutEventName;
+  readonly name: CheckoutEventName | 'checkout_resumed';
+  readonly surface?: 'application' | 'http' | 'ssr' | 'demo';
   readonly sessionId: SessionId;
   readonly at: Instant; // authoritative transaction timestamp
   readonly observedAt?: Instant; // injected application clock, telemetry only

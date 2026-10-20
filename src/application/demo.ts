@@ -1,3 +1,5 @@
+import type { Analytics } from './ports';
+import { recordEvents } from './telemetry';
 import type { CheckoutSnapshot } from './checkout-service';
 import type { CheckoutPolicy } from '../domain/checkout';
 import { DomainError } from '../domain/errors';
@@ -35,6 +37,7 @@ export class DemoService {
     private readonly repository: DemoRepository,
     private readonly policy: CheckoutPolicy,
     private readonly enabled: boolean,
+    private readonly analytics?: Analytics,
   ) {}
   private guard() {
     if (!this.enabled) {
@@ -46,7 +49,7 @@ export class DemoService {
 
     return this.repository.readDemo(id);
   }
-  mutate(input: DemoMutation) {
+  async mutate(input: DemoMutation) {
     this.guard();
 
     if (
@@ -66,7 +69,22 @@ export class DemoService {
       throw new DomainError('INVALID_SELECTION', 'Invalid demo mutation');
     }
 
-    return this.repository.mutateDemo(input, this.policy);
+    const result = await this.repository.mutateDemo(input, this.policy);
+
+    if (this.analytics) {
+      recordEvents(
+        this.analytics,
+        result,
+        input.action === 'PRICE'
+          ? ['quote_changed']
+          : input.action === 'EXPIRE'
+            ? ['checkout_expired']
+            : [],
+        'demo',
+      );
+    }
+
+    return result;
   }
   async reset(confirmation: string) {
     this.guard();

@@ -39,9 +39,9 @@ test.beforeEach(async () => {
   await env.redis.command('FLUSHDB');
 });
 test.afterEach(async () => {
-  for (const context of contexts.splice(0)) {
-    await context.close();
-  }
+  // Separate slow trace/context disposal from the scenario's assertion budget.
+  test.setTimeout(90_000);
+  await Promise.all(contexts.splice(0).map((context) => context.close()));
 });
 
 async function pageOn(browser: Browser, server = 0, mobile = false) {
@@ -178,6 +178,14 @@ test('server renders event, selected seats, total and reservation before JavaScr
 
   contexts.push(context);
   const page = await context.newPage();
+
+  await page.goto(env.bases[0] + `/events/${listing.eventId}`);
+  await expect(
+    page.getByRole('heading', { name: /Dallas Cowboys/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('6 available · 2 reserved · 0 sold', { exact: true }),
+  ).toBeVisible();
   const response = await page.goto(env.bases[0] + `/checkout/${s.session.id}`);
 
   expect(response!.status()).toBe(200);
@@ -649,4 +657,145 @@ test('keyboard skip navigation is discoverable and hidden during pointer interac
   expect(await skip.evaluate((el) => getComputedStyle(el).clipPath)).toBe(
     'inset(50%)',
   );
+});
+
+test('competing devices submit different payment keys but receive one order and one confirmation', async ({
+  browser,
+}) => {
+  const a = await pageOn(browser),
+    b = await pageOn(browser, 1);
+  const id = await reserve(a.page, a.base);
+
+  await b.page.goto(b.base + `/checkout/${id}`);
+  await expect(
+    b.page.getByRole('button', { name: /Complete simulated/ }),
+  ).toBeEnabled();
+  const responses = [a.page, b.page].map((page) =>
+    page.waitForResponse(
+      (r) =>
+        r.url().endsWith(`/api/checkouts/${id}/complete`) &&
+        r.request().method() === 'POST',
+    ),
+  );
+
+  await Promise.all(
+    [a.page, b.page].map((page) =>
+      page.getByRole('button', { name: /Complete simulated/ }).click(),
+    ),
+  );
+  const returned = await Promise.all(responses);
+
+  expect(returned[0]!.request().headers()['idempotency-key']).not.toBe(
+    returned[1]!.request().headers()['idempotency-key'],
+  );
+  await expect
+    .poll(
+      () =>
+        [a.page.url(), b.page.url()].filter((url) =>
+          /\/orders\/.+\/confirmation$/.test(url),
+        ).length,
+    )
+    .toBe(1);
+  const winner = /\/orders\/.+\/confirmation$/.test(a.page.url()) ? a : b;
+  const observer = winner === a ? b : a;
+
+  await expect(observer.page).toHaveURL(observer.base + '/');
+  await winner.page.reload();
+  await expect(
+    winner.page.getByRole('heading', { name: "You're going." }),
+  ).toBeVisible();
+  const persisted = JSON.parse(
+    await env.redis.command(
+      'GET',
+      `checkout:{${env.namespace}}:session:v2:${id}`,
+    ),
+  );
+
+  expect(persisted.session.paymentAttemptCount).toBe(1);
+  expect(Object.keys(persisted.attempts)).toHaveLength(1);
+  const receipt = JSON.parse(
+    await env.redis.command(
+      'GET',
+      `checkout:{${env.namespace}}:completed:v2:${id}`,
+    ),
+  );
+
+  expect(receipt.orderId).toBe(persisted.session.orderId);
+  const keys = (
+    await env.redis.command('KEYS', `checkout:{${env.namespace}}:order:v2:*`)
+  )
+    .split('\n')
+    .filter(Boolean);
+
+  expect(keys).toHaveLength(1);
+  expect((await inventory()).soldQuantity).toBe(2);
+  expect(Object.keys((await inventory()).reservations)).toHaveLength(0);
+  await observer.page.goto(observer.base + `/events/${listing.eventId}`);
+  await expect(
+    observer.page.getByText('6 available · 0 reserved · 2 sold', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await observer.page.goto(observer.base + `/checkout/${id}`);
+  await expect(observer.page).toHaveURL(observer.base + '/');
+});
+
+test('ticket availability errors disable cached reservations and empty responses remain recoverable', async ({
+  browser,
+}) => {
+  const a = await pageOn(browser);
+
+  await a.page.goto(a.base + `/events/${listing.eventId}`);
+  const card = a.page.getByRole('article', {
+    name: listing.allocation.section,
+    exact: true,
+  });
+
+  await expect(
+    card.getByRole('button', { name: 'Reserve tickets', exact: true }),
+  ).toBeEnabled();
+  const path = `**/api/events/${listing.eventId}/listings`;
+
+  await a.page.route(path, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: false,
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Injected transport failure',
+        },
+      }),
+    }),
+  );
+  await expect(
+    a.page.getByText("We couldn't refresh ticket availability.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    card.getByRole('button', { name: 'Reserve tickets', exact: true }),
+  ).toBeDisabled();
+  await a.page.unroute(path);
+  await a.page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect(
+    card.getByRole('button', { name: 'Reserve tickets', exact: true }),
+  ).toBeEnabled();
+  await a.page.route(path, (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: { listings: [] } }),
+    }),
+  );
+  await expect(
+    a.page.getByRole('heading', { name: 'No listings just yet.' }),
+  ).toBeVisible();
+  await expect(
+    a.page.getByRole('button', { name: 'Reserve tickets', exact: true }),
+  ).toHaveCount(0);
+  await a.page.unroute(path);
+  await expect(
+    card.getByRole('button', { name: 'Reserve tickets', exact: true }),
+  ).toBeEnabled();
 });

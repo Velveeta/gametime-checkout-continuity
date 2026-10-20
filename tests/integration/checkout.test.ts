@@ -919,14 +919,18 @@ describe('real Redis checkout transactions across independent instances', () => 
   });
   it('keeps one recovery successor when its completed metadata is collected before the original', async () => {
     const a = await instance({
-      policy: { holdMs: 100, processingMs: 50, retentionAfterExpiryMs: 1500 },
+      policy: {
+        holdMs: 100,
+        processingMs: 500,
+        retentionAfterExpiryMs: 60_000,
+      },
       replayRetentionMs: 100,
     });
     const original = await create(a);
 
     await redis.after(original.session.reservationExpiresAt);
     const b = await instance({
-      policy: { holdMs: 150, processingMs: 50, retentionAfterExpiryMs: 100 },
+      policy: { holdMs: 1500, processingMs: 500, retentionAfterExpiryMs: 1000 },
       replayRetentionMs: 100,
     });
     const first = value(
@@ -943,7 +947,9 @@ describe('real Redis checkout transactions across independent instances', () => 
 
     const successor = value(await b.checkout.read(first.sessionId));
 
-    value(await b.checkout.complete(request(successor)));
+    const completed = value(await b.checkout.complete(request(successor)));
+
+    expect(completed.kind).toBe('COMPLETED');
     await redis.after(
       new Date(
         Date.parse(successor.session.recoveryRetainUntil) + 110,

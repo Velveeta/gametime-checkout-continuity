@@ -33,9 +33,11 @@ export interface ListingRow {
 function ListingCard({
   row,
   refresh,
+  unavailable,
 }: {
   row: ListingRow;
   refresh: () => void;
+  unavailable: boolean;
 }) {
   const { listing, availability } = row;
   const router = useRouter();
@@ -152,7 +154,7 @@ function ListingCard({
           )}
         </p>
         <Button
-          disabled={!selected || reserve.isPending}
+          disabled={unavailable || !selected || reserve.isPending}
           onClick={() => reserve.mutate()}
         >
           {reserve.isPending ? (
@@ -233,6 +235,7 @@ export function Listings({
           row={row}
           key={row.listing.id}
           refresh={() => void query.refetch()}
+          unavailable={query.isError}
         />
       ))}
       {query.data?.listings.length === 0 && (

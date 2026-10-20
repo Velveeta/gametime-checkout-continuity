@@ -605,4 +605,37 @@ describe('guarded scenarios against real Redis', () => {
     ).toBe('0');
     expect((await fresh.store.getAvailability(listing.id)).counts.held).toBe(2);
   });
+  it('correlates committed developer price/expiry observations without changing checkout contracts', async () => {
+    const recorded: import('../../src/application/ports').AnalyticsEvent[] = [];
+    const b = await composeCheckout({
+      ...options(),
+      analytics: {
+        record: async (event) => {
+          recorded.push(event);
+        },
+      },
+    });
+    const s = await create();
+    const raised = await b.demo.mutate({
+      action: 'PRICE',
+      direction: 'INCREASE',
+      sessionId: s.session.id,
+      expectedVersion: s.session.version,
+    });
+
+    await b.demo.mutate({
+      action: 'EXPIRE',
+      sessionId: s.session.id,
+      expectedVersion: raised.session.version,
+    });
+    expect(
+      recorded.map((event) => [event.name, event.sessionId, event.surface]),
+    ).toEqual([
+      ['quote_changed', s.session.id, 'demo'],
+      ['checkout_expired', s.session.id, 'demo'],
+    ]);
+    expect(
+      recorded.every((event) => event.at && event.version > s.session.version),
+    ).toBe(true);
+  });
 });

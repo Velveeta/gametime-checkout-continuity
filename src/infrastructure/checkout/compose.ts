@@ -1,3 +1,4 @@
+import { ConsoleAnalytics } from './analytics';
 import { DemoService } from '../../application/demo';
 import { DEFAULT_CHECKOUT_POLICY } from '../../domain/checkout';
 import { DemoHttpApi } from '../http/demo-api';
@@ -25,6 +26,7 @@ export async function composeCheckout(options: {
   payment?: Payment;
   policy?: CheckoutPolicy;
   analytics?: Analytics;
+  telemetrySurface?: 'application' | 'http' | 'ssr' | 'demo';
   replayRetentionMs?: number;
   demoEnabled?: boolean;
   demoSecret?: string;
@@ -56,6 +58,7 @@ export async function composeCheckout(options: {
     getListing: store.getListing.bind(store),
     listListings: store.listListings.bind(store),
   };
+  const analytics = options.analytics ?? new ConsoleAnalytics();
   const checkout = new CheckoutApplication({
     repository: store,
     orders: store,
@@ -66,11 +69,8 @@ export async function composeCheckout(options: {
     ids: { next: () => randomUUID() },
     completion: new HmacCompletionAuthority(options.completionSecret),
     ...(options.policy ? { policy: options.policy } : {}),
-    analytics: options.analytics ?? {
-      record: async (event) => {
-        console.info(JSON.stringify({ type: 'checkout_event', ...event }));
-      },
-    },
+    analytics,
+    telemetrySurface: options.telemetrySurface ?? 'application',
   });
   const api = new CheckoutHttpApi({
     checkout,
@@ -83,6 +83,7 @@ export async function composeCheckout(options: {
     store,
     options.policy ?? DEFAULT_CHECKOUT_POLICY,
     options.demoEnabled ?? false,
+    analytics,
   );
   const demoApi = new DemoHttpApi(demo, api, {
     enabled: options.demoEnabled ?? false,

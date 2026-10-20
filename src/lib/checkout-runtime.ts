@@ -6,7 +6,9 @@ import { apiFailure, type CheckoutHttpApi } from '../infrastructure/http/api';
 import { parseServerEnv, requireCheckoutEnv } from './env';
 
 /** Fresh composition per invocation; Redis alone owns persistent state. */
-export async function checkoutRuntime() {
+export async function checkoutRuntime(
+  surface: 'http' | 'ssr' | 'demo' = 'ssr',
+) {
   const env = requireCheckoutEnv(process.env);
   const redis = upstashRedis({ url: env.url, token: env.token });
 
@@ -18,6 +20,7 @@ export async function checkoutRuntime() {
     secureCookies: process.env.NODE_ENV === 'production',
     payment: new SimulatedPayment(env.PAYMENT_SCENARIO),
     demoEnabled: env.DEMO_MODE,
+    telemetrySurface: surface,
     ...(env.DEMO_SECRET ? { demoSecret: env.DEMO_SECRET } : {}),
   });
 }
@@ -26,7 +29,7 @@ export async function withCheckoutApi(
   action: (api: CheckoutHttpApi) => Promise<Response>,
 ) {
   try {
-    return await action((await checkoutRuntime()).api);
+    return await action((await checkoutRuntime('http')).api);
   } catch {
     return apiFailure(
       'SERVICE_UNAVAILABLE',
@@ -47,7 +50,7 @@ export async function withDemoApi(
       return apiFailure('NOT_FOUND', 'Not found');
     }
 
-    return await action((await checkoutRuntime()).demoApi);
+    return await action((await checkoutRuntime('demo')).demoApi);
   } catch {
     return apiFailure(
       'SERVICE_UNAVAILABLE',

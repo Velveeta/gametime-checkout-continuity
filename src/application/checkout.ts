@@ -1,3 +1,4 @@
+import { recordEvents } from './telemetry';
 import {
   DEFAULT_CHECKOUT_POLICY,
   reconcileCheckout,
@@ -38,6 +39,7 @@ export interface CheckoutDependencies {
   readonly payment: Payment;
   readonly clock: Clock; // telemetry observation only, never deadline authority
   readonly analytics: Analytics;
+  readonly telemetrySurface?: 'application' | 'http' | 'ssr' | 'demo';
   readonly ids: Identifiers;
   readonly completion: CompletionAuthority;
   readonly policy?: CheckoutPolicy;
@@ -61,8 +63,8 @@ function snapshot(mutation: {
   return { session: mutation.session, serverNow: mutation.serverNow };
 }
 
-/** Production application logic, intentionally unwired until Wave 03 provides
- * atomic persistence. No process-local lock, mutable session cache or timer.
+/** Framework-independent orchestration over atomic persistence contracts.
+ * No process-local lock, mutable session cache or correctness timer.
  */
 export class CheckoutApplication implements CheckoutService {
   private readonly policy: CheckoutPolicy;
@@ -78,17 +80,12 @@ export class CheckoutApplication implements CheckoutService {
     );
 
     if (result.ok) {
-      // Delivery failures never turn a successful purchase into a failure/retry.
-      void Promise.allSettled(
-        result.value.events.map(async (name) =>
-          this.dependencies.analytics.record({
-            name,
-            sessionId: result.value.session.id,
-            version: result.value.session.version,
-            at: result.value.serverNow,
-            observedAt: this.dependencies.clock.now(),
-          }),
-        ),
+      recordEvents(
+        this.dependencies.analytics,
+        snapshot(result.value),
+        result.value.events,
+        this.dependencies.telemetrySurface ?? 'application',
+        () => this.dependencies.clock.now(),
       );
     }
 
@@ -175,6 +172,16 @@ export class CheckoutApplication implements CheckoutService {
     }
 
     if (session.status !== 'EXPIRED') {
+      if (input.intent === 'FRESH_NAVIGATION') {
+        recordEvents(
+          this.dependencies.analytics,
+          result.value,
+          ['checkout_resumed'],
+          this.dependencies.telemetrySurface ?? 'application',
+          () => this.dependencies.clock.now(),
+        );
+      }
+
       return ok({ kind: 'RENDER', snapshot: result.value });
     }
 
