@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseServerEnv, requireRedisEnv } from "./env";
+import { parseServerEnv, requireRedisEnv, requireCheckoutEnv } from "./env";
 
 describe("server configuration", () => {
   it("builds the scaffold without credentials and defaults demo off", () => {
@@ -37,5 +37,20 @@ describe("server configuration", () => {
     try { parseServerEnv({ DEMO_SECRET: "sensitive-input" }); } catch (error) {
       expect(String(error)).not.toContain("sensitive-input");
     }
+  });
+});
+
+
+describe("Wave 03 runtime configuration", () => {
+  const credentials={UPSTASH_REDIS_REST_URL:"https://example.upstash.io",UPSTASH_REDIS_REST_TOKEN:"example"};
+  it("requires distinct caller/completion secrets at runtime but not build", () => {
+    expect(() => requireCheckoutEnv(credentials)).toThrow("secrets are required");
+    expect(() => requireCheckoutEnv({...credentials,CHECKOUT_CALLER_SECRET:"x".repeat(32),CHECKOUT_COMPLETION_SECRET:"x".repeat(32)})).toThrow("distinct");
+    expect(requireCheckoutEnv({...credentials,CHECKOUT_CALLER_SECRET:"x".repeat(32),CHECKOUT_COMPLETION_SECRET:"y".repeat(32)}).CHECKOUT_NAMESPACE).toBe("gametime-demo");
+  });
+  it("rejects namespace injection and non-demo scenario changes", () => {
+    expect(() => parseServerEnv({CHECKOUT_NAMESPACE:"bad}:other"})).toThrow();
+    expect(() => parseServerEnv({PAYMENT_SCENARIO:"DECLINE"})).toThrow("require DEMO_MODE");
+    expect(parseServerEnv({PAYMENT_SCENARIO:"DECLINE",DEMO_MODE:"true",DEMO_SECRET:"x".repeat(32)}).PAYMENT_SCENARIO).toBe("DECLINE");
   });
 });

@@ -85,7 +85,7 @@ local function inventoryReserve(state,request,holdDurationMs,now)
        previous.listingVersion~=request.expectedListingVersion or not same(previous.selection,request.selection) then
       return failure('RESERVATION_CONFLICT')
     end
-    if previous.status=='EXPIRED' then return failure('RESERVATION_EXPIRED') end
+    if previous.status=='EXPIRED' or previous.status=='RELEASED' then return failure('RESERVATION_EXPIRED') end
     if previous.status=='SOLD' then return failure('TERMINAL_SESSION') end
     return result(previous) -- idempotent replay NEVER changes the deadline or revision
   end

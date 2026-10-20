@@ -18,7 +18,7 @@ export type CompleteCheckoutInput = CompletionIdentity & {
 };
 export interface CheckoutService {
   create(input: { readonly listingId: ListingId; readonly allocation: SeatAllocation; readonly expectedListingVersion: Version }): Promise<Result<CheckoutSnapshot>>;
-  /** Read-only: does not reserve, recover, refresh quote, or mutate inventory. */
+  /** Read-only: does not reserve/recover or persist quote/inventory mutations. */
   getSession(sessionId: SessionId): Promise<Result<CheckoutSnapshot>>;
   read(sessionId: SessionId): Promise<Result<CheckoutSnapshot>>;
   /** Explicit atomic expiry/processing reconciliation; never creates a session. */

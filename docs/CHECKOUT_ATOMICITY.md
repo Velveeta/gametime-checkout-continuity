@@ -1,4 +1,8 @@
-# Wave 02: domain rules and the atomic persistence boundary
+# Wave 02 design record: domain rules and atomic persistence
+
+Wave 03 implements these boundaries through validated optimistic Redis commits;
+see `PERSISTENCE_API.md` for current behavior and verified tests. The requirements
+below describe the design stage and remain useful integration constraints.
 
 ## What runs now
 

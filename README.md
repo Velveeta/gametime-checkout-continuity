@@ -148,7 +148,7 @@ only the original binding gets a stable capability on successful replay. A
 server-secret HMAC authority is implemented; no secret is embedded or configured
 by default. Confirmation reads require a capability and can be refreshed.
 
-**No production checkout Redis adapter is wired in this wave.** Application tests
+**At the Wave 02 milestone, no production checkout Redis adapter was wired.** Application tests
 use a clearly separated test-only transaction model. The existing real-Redis
 inventory tests remain separate. Passing model contention tests does not establish
 production checkout concurrency safety or durability. See
@@ -159,3 +159,38 @@ was added. The app still renders its foundation page.
 Run `npm test` for unit/domain/application/model tests, `npm run test:integration`
 for standalone real-Redis inventory tests, or `npm run check` for both plus lint,
 strict types and production build. Local Redis binary prerequisites are unchanged.
+
+
+## Wave 03 — persisted checkout and HTTP API
+
+`RedisCheckoutStore` now implements checkout, reservation/processing protection,
+attempt/replay and order persistence using a Redis snapshot + conditional Lua
+commit. The commit validates every read key and deadline boundary, starts fresh
+deadlines from Redis commit time, and publishes all affected records with one
+MSET. Existing event keys are preserved; checkout metadata uses one same-slot
+namespace index. Prototype aggregate size/contention limits are documented.
+
+Nine JSON Route Handlers validate inputs with Zod and call the application
+services. `/checkout/[id]` is a dynamic SSR routing boundary with minimal initial
+HTML. Responsive checkout/event/confirmation UI and developer controls remain
+later-wave work. The homepage is still the foundation page.
+
+Runtime now requires Upstash HTTPS REST credentials plus CHECKOUT_NAMESPACE and
+two distinct persistent secrets: CHECKOUT_CALLER_SECRET and
+CHECKOUT_COMPLETION_SECRET. Generate each with `openssl rand -hex 32`, put them in
+`.env.local`, and run `npm run dev`. Never expose them via NEXT_PUBLIC variables.
+Builds do not require credentials. See `.env.example` and
+`docs/PERSISTENCE_API.md` for complete setup, request shapes and status codes.
+
+Creation/checkout reads establish a signed HttpOnly caller cookie; complete
+requires that cookie and Idempotency-Key. Confirmation credentials travel in a
+separate HttpOnly cookie, never ordinary JSON or URLs. Keep the original request
+body, cookie and key for a lost-response replay. Polling GET is read-only and
+nonrecovering; 410 includes expired snapshot data. Explicit recovery is fresh-only.
+
+`npm run check` now also runs a built Next HTTP/SSR test after the production
+build. It requires openssl in addition to local Redis binaries. The actual SDK
+uses a test-only TLS REST bridge backed by real Redis. Hosted verification is
+separate and was not run without credentials: export `.env.local` and run
+`npm run test:upstash`. Its generated test namespace is isolated and cleaned up.
+No website has been deployed or pushed to GitHub.

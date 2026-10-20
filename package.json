@@ -13,8 +13,10 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run lint && npm run typecheck && npm test && npm run test:integration && npm run build",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "check": "npm run lint && npm run typecheck && npm test && npm run test:integration && npm run build && npm run test:http",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:upstash": "vitest run --config vitest.upstash.config.ts",
+    "test:http": "vitest run --config vitest.http.config.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.5.0",
