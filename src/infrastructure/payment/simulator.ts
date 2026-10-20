@@ -37,6 +37,18 @@ export class SimulatedPayment implements Payment {
   ): Promise<PaymentOutcome> {
     await this.pause(this.delayMs);
 
+    if (input.simulation === 'DECLINED') {
+      return { kind: 'DECLINED' };
+    }
+
+    if (input.simulation === 'TRANSIENT_FAILURE') {
+      return { kind: 'TRANSIENT_FAILURE' };
+    }
+
+    if (input.simulation === 'SUCCESS') {
+      return { kind: 'SUCCEEDED', reference: `simulated:${input.attemptId}` };
+    }
+
     switch (this.scenario) {
       case 'UNKNOWN':
         return { kind: 'UNKNOWN' };

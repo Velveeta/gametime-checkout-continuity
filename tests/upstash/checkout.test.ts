@@ -11,6 +11,7 @@ let client: ReturnType<typeof upstashRedis>;
 const touchedKeys = new Set<string>();
 let a: Awaited<ReturnType<typeof composeCheckout>>;
 let b: Awaited<ReturnType<typeof composeCheckout>>;
+let composeOptions: Parameters<typeof composeCheckout>[0];
 
 beforeAll(async () => {
   const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -49,6 +50,7 @@ beforeAll(async () => {
     analytics: { record: async () => {} },
   };
 
+  composeOptions = options;
   a = await composeCheckout(options);
   b = await composeCheckout(options);
 });
@@ -138,4 +140,93 @@ it('verifies real hosted SDK/EVAL transport, competing claims, cross-instance co
     held: 0,
     sold: 2,
   });
+});
+
+it('verifies hosted demo persistence, commit-time deadlines, one-shot payment and reset fencing/cleanup', async () => {
+  const options = {
+    ...composeOptions,
+    demoEnabled: true,
+    demoSecret: randomUUID() + randomUUID(),
+  };
+  const retired = await composeCheckout(options);
+
+  await retired.demo.reset('RESET DEMO DATA');
+  const first = await composeCheckout(options);
+  const second = await composeCheckout(options);
+  const listing = listings[0]!;
+
+  if (listing.allocation.kind !== 'ASSIGNED') {
+    throw new Error();
+  }
+
+  const created = await first.checkout.create({
+    listingId: listing.id,
+    allocation: { ...listing.allocation, seats: [9, 10] },
+    expectedListingVersion: version(1),
+  });
+
+  if (!created.ok) {
+    throw created.error;
+  }
+
+  let s = await first.demo.mutate({
+    action: 'PRICE',
+    direction: 'INCREASE',
+    sessionId: created.value.session.id,
+    expectedVersion: created.value.session.version,
+  });
+
+  expect((await second.demo.read(s.session.id)).checkout.session.status).toBe(
+    'PRICE_REVIEW',
+  );
+  const accepted = await second.checkout.acceptQuote({
+    sessionId: s.session.id,
+    expectedVersion: s.session.version,
+    quoteVersion: s.session.quote.version,
+  });
+
+  if (!accepted.ok) {
+    throw accepted.error;
+  }
+
+  s = await first.demo.mutate({
+    action: 'DEADLINE',
+    minutes: 1,
+    sessionId: s.session.id,
+    expectedVersion: accepted.value.session.version,
+  });
+  expect(
+    Date.parse(s.session.reservationExpiresAt) - Date.parse(s.serverNow),
+  ).toBe(60_000);
+  s = await first.demo.mutate({
+    action: 'PAYMENT',
+    scenario: 'TRANSIENT_FAILURE',
+    sessionId: s.session.id,
+    expectedVersion: s.session.version,
+  });
+  const result = await second.checkout.complete({
+    sessionId: s.session.id,
+    expectedVersion: s.session.version,
+    quoteVersion: s.session.quote.version,
+    callerId: 'demo-live-device',
+    idempotencyKey: 'demo-transient',
+  });
+
+  expect(
+    result.ok &&
+      result.value.kind === 'UPDATED' &&
+      result.value.snapshot.session.status,
+  ).toBe('PAYMENT_RETRYABLE');
+  expect((await first.demo.read(s.session.id)).configuration.nextPayment).toBe(
+    'DEFAULT',
+  );
+  await first.demo.reset('RESET DEMO DATA');
+  await expect(second.store.read(s.session.id)).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  });
+  const fresh = await composeCheckout(options);
+
+  expect((await fresh.store.getAvailability(listing.id)).available).toEqual([
+    listing.allocation,
+  ]);
 });

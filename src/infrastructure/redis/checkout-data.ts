@@ -1,3 +1,4 @@
+import type { DemoConfiguration, DemoPayment } from '../../application/demo';
 import { z } from 'zod';
 import type {
   CheckoutCommand,
@@ -119,6 +120,25 @@ export const sessionSchema = z.discriminatedUnion('status', [
     })
     .strict(),
 ]);
+export const demoConfigurationSchema = z
+  .object({
+    nextPayment: z.enum([
+      'DEFAULT',
+      'SUCCESS',
+      'TRANSIENT_FAILURE',
+      'DECLINED',
+    ]),
+    price: z
+      .object({ unitPrice: money, feePerTicket: money, version: positive })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .transform(({ nextPayment, price }) => ({
+    nextPayment,
+    ...(price ? { price } : {}),
+  }));
+
 export interface StoredHold {
   id: string;
   sessionId: string;
@@ -149,6 +169,7 @@ export interface AttemptRecord {
   status:
     'PROCESSING' | 'FENCED' | 'SUCCEEDED' | 'TRANSIENT_FAILURE' | 'DECLINED';
   ordinal: number;
+  simulation?: Exclude<DemoPayment, 'DEFAULT'>;
 }
 export interface LedgerEntry {
   callerId: string;
@@ -159,6 +180,7 @@ export interface LedgerEntry {
 /** An ephemeral transaction working set, never a persisted namespace aggregate. */
 export interface CheckoutWorkingSet {
   sessions: Record<string, CheckoutSession>;
+  demo: Record<string, DemoConfiguration>;
   orders: Record<string, Order>;
   orderBySession: Record<string, string>;
   digests: Record<string, string>;
@@ -169,6 +191,7 @@ export interface CheckoutWorkingSet {
 export function emptyWorkingSet(): CheckoutWorkingSet {
   return {
     sessions: {},
+    demo: {},
     orders: {},
     orderBySession: {},
     digests: {},
@@ -182,6 +205,7 @@ export const REPLAY_RETENTION_MS = 24 * 60 * 60_000;
 export interface SessionDocument {
   schemaVersion: 2;
   session: CheckoutSession;
+  demo?: DemoConfiguration;
   attempts: Record<string, AttemptRecord>;
   ledger: Record<string, LedgerEntry>;
 }

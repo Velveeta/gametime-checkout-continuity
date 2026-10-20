@@ -117,7 +117,7 @@ export interface HttpDependencies {
  */
 export class CheckoutHttpApi {
   constructor(private readonly services: HttpDependencies) {}
-  private async body<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
+  async body<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
     const origin = request.headers.get('origin');
     // Next may reconstruct request.url with its internal listening hostname.
     // The browser's Host header describes the public origin. Do not trust an

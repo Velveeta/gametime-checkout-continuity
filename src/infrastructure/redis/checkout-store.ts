@@ -1,3 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import type {
+  DemoConfiguration,
+  DemoMutation,
+  DemoRepository,
+} from '../../application/demo';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type {
   CatalogRepository,
@@ -8,6 +14,7 @@ import type {
 } from '../../application/ports';
 import type { ListingAvailability } from '../../application/inventory-contracts';
 import {
+  changeCheckoutDeadline,
   acceptCheckoutQuote,
   claimCheckout,
   createCheckout,
@@ -37,11 +44,12 @@ import type {
   Order,
   SeatAllocation,
 } from '../../domain/models';
-import { instant, version } from '../../domain/values';
+import { cents, instant, version } from '../../domain/values';
 import { validateCatalog } from '../catalog/catalog';
 import type { RedisScriptExecutor } from './inventory';
-import { COMMIT_LUA, SNAPSHOT_LUA, SEED_LUA } from './transactions';
+import { COMMIT_LUA, SNAPSHOT_LUA, SEED_LUA, RESET_LUA } from './transactions';
 import {
+  demoConfigurationSchema,
   emptyWorkingSet,
   fingerprint,
   get,
@@ -78,7 +86,7 @@ interface Snapshot {
 interface Relative {
   inventoryKeyIndex: number;
   sessionKeyIndex: number;
-  mode: 'CREATE' | 'PROTECT';
+  mode: 'CREATE' | 'PROTECT' | 'DEADLINE';
   holdMs?: number;
   retentionMs?: number;
   processingMs?: number;
@@ -129,13 +137,16 @@ function seatKey(
 /** All business decisions use the domain functions. Lua validates the ENTIRE read
  * set and temporal validity interval, then publishes with one MSET. No local locks.
  */
-export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
+type StoreContracts = CheckoutRepository & OrderRepository & DemoRepository;
+
+export class RedisCheckoutStore implements StoreContracts {
   readonly prefix: string;
   constructor(
     private readonly redis: RedisScriptExecutor,
     private readonly seeds: CatalogRepository,
     namespace: string,
     private readonly retention = { replayMs: REPLAY_RETENTION_MS },
+    private readonly fence?: { key: string; generation: string },
   ) {
     identifierSchema.parse(namespace);
 
@@ -143,7 +154,11 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       throw new RangeError('Invalid replay retention');
     }
 
-    this.prefix = `checkout:{${namespace}}:`;
+    this.prefix =
+      `checkout:{${namespace}}:` +
+      (fence && fence.generation !== 'base'
+        ? `generation:${identifierSchema.parse(fence.generation)}:`
+        : '');
   }
   sessionKey(id: string) {
     return this.prefix + 'session:v2:' + identifierSchema.parse(id);
@@ -192,10 +207,15 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       const value = parse(
         await this.redis.eval<{ raw: string[]; nowMs: number } | string>(
           SNAPSHOT_LUA,
-          keys,
-          [],
+          this.fence ? [...keys, this.fence.key] : keys,
+          this.fence ? [this.fence.generation] : [],
         ),
       );
+
+      if ('stale' in value) {
+        fail('NOT_FOUND');
+      }
+
       const index = emptyWorkingSet();
       const documents: Snapshot['documents'] = new Map();
       const inventories: InventoryDocument[] = [];
@@ -231,6 +251,13 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           }
 
           index.sessions[checkout.id] = checkout;
+
+          if (document.demo) {
+            index.demo[checkout.id] = demoConfigurationSchema.parse(
+              document.demo,
+            );
+          }
+
           Object.assign(index.attempts, document.attempts);
           Object.assign(index.ledger, document.ledger);
           needed.add(this.inventoryKey(checkout.listingId));
@@ -521,7 +548,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       } as CheckoutDecision;
     }
 
-    const listing = this.find(s, effective.listingId).listing;
+    const listing = this.effectiveListing(s, effective);
 
     return refreshCheckoutQuote(
       effective,
@@ -626,6 +653,9 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           session: checkout,
           attempts,
           ledger,
+          ...(s.index.demo[checkout.id]
+            ? { demo: s.index.demo[checkout.id] }
+            : {}),
         } satisfies SessionDocument);
       }
 
@@ -657,6 +687,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
             message: plan.response.error.message,
           };
       const proposal = {
+        generation: this.fence?.generation,
         expected: s.raw,
         observedAt: s.nowMs,
         validBefore,
@@ -690,8 +721,14 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       const result = parse(
         await this.redis.eval<
           { committed: boolean; response?: unknown } | string
-        >(COMMIT_LUA, s.keys, [JSON.stringify(wire(proposal))]),
+        >(COMMIT_LUA, this.fence ? [...s.keys, this.fence.key] : s.keys, [
+          JSON.stringify(wire(proposal)),
+        ]),
       );
+
+      if ('stale' in result) {
+        fail('NOT_FOUND');
+      }
 
       if (!result.committed) {
         continue;
@@ -766,8 +803,15 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         [
           ...legacy,
           ...listings.map((listing) => this.inventoryKey(listing.id)),
+          ...(this.fence ? [this.fence.key] : []),
         ],
-        [JSON.stringify({ legacyCount: legacy.length, values: documents })],
+        [
+          JSON.stringify({
+            legacyCount: legacy.length,
+            values: documents,
+            generation: this.fence?.generation,
+          }),
+        ],
       ),
     );
 
@@ -789,13 +833,249 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       serverNow: this.now(s),
     };
   }
+  private effectiveListing(s: Snapshot, checkout: CheckoutSession) {
+    const listing = this.find(s, checkout.listingId).listing;
+    const price = s.index.demo[checkout.id]?.price;
+
+    return price
+      ? {
+          ...listing,
+          unitPrice: cents(price.unitPrice),
+          feePerTicket: cents(price.feePerTicket),
+          version: version(price.version),
+        }
+      : listing;
+  }
+  async readDemo(id: string) {
+    identifierSchema.parse(id);
+    const s = await this.snapshot({ sessionId: id });
+    const checkout = s.index.sessions[id];
+
+    if (!checkout || Date.parse(checkout.recoveryRetainUntil) <= s.nowMs) {
+      fail('NOT_FOUND');
+    }
+
+    return {
+      checkout: {
+        session: this.projectQuote(s, checkout).session,
+        serverNow: this.now(s),
+      },
+      configuration: s.index.demo[id] ?? { nextPayment: 'DEFAULT' as const },
+    };
+  }
+  async mutateDemo(input: DemoMutation, policy: CheckoutPolicy) {
+    const result = await this.transaction(
+      { sessionId: input.sessionId },
+      (s) => {
+        const plan: Plan = {
+          relative: [],
+          response: {
+            ok: false,
+            error: new DomainError('NOT_FOUND', 'NOT_FOUND'),
+          },
+        };
+
+        try {
+          let current = s.index.sessions[input.sessionId];
+
+          if (!current) {
+            fail('NOT_FOUND');
+          }
+
+          const quoted = this.projectQuote(s, current);
+
+          this.apply(s, quoted);
+          current = quoted.session;
+
+          if (current.status === 'EXPIRED') {
+            fail('RESERVATION_EXPIRED');
+          }
+
+          if (current.status === 'PROCESSING') {
+            fail('PROCESSING_IN_PROGRESS');
+          }
+
+          if (
+            current.status === 'PAYMENT_FAILED' ||
+            current.status === 'COMPLETED'
+          ) {
+            fail('TERMINAL_SESSION');
+          }
+
+          if (current.version !== input.expectedVersion) {
+            fail('VERSION_CONFLICT');
+          }
+
+          const configuration = s.index.demo[current.id] ?? {
+            nextPayment: 'DEFAULT' as const,
+          };
+
+          s.index.demo[current.id] = configuration;
+
+          if (input.action === 'DEADLINE' || input.action === 'EXPIRE') {
+            const expiresAt = instant(
+              new Date(
+                s.nowMs +
+                  (input.action === 'EXPIRE' ? 0 : input.minutes * 60_000),
+              ).toISOString(),
+            );
+            const decision = changeCheckoutDeadline(
+              current,
+              { expectedVersion: current.version, expiresAt, authorized: true },
+              this.now(s),
+              policy,
+            );
+
+            this.apply(s, decision);
+            current = decision.session;
+
+            if (input.action === 'DEADLINE') {
+              plan.relative.push({
+                mode: 'DEADLINE',
+                inventoryKeyIndex:
+                  s.keys.indexOf(this.inventoryKey(current.listingId)) + 1,
+                sessionKeyIndex:
+                  s.keys.indexOf(this.sessionKey(current.id)) + 1,
+                holdMs: input.minutes * 60_000,
+                retentionMs: policy.retentionAfterExpiryMs,
+              });
+            }
+          } else if (input.action === 'PRICE') {
+            const listing = this.effectiveListing(s, current);
+            const delta = Math.max(100, Math.round(listing.unitPrice * 0.1));
+
+            configuration.price = {
+              unitPrice: cents(
+                Math.max(
+                  0,
+                  listing.unitPrice +
+                    (input.direction === 'INCREASE' ? delta : -delta),
+                ),
+              ),
+              feePerTicket: listing.feePerTicket,
+              version: current.quote.version + 1,
+            };
+            const changed = this.projectQuote(s, current);
+
+            this.apply(s, changed);
+            current = changed.session;
+          } else {
+            configuration.nextPayment = input.scenario;
+            current = { ...current, version: version(current.version + 1) };
+            s.index.sessions[current.id] = current;
+          }
+
+          plan.response = pass({
+            kind: 'UPDATED',
+            session: current,
+            serverNow: this.now(s),
+            events: [],
+          });
+        } catch (error) {
+          if (!(error instanceof DomainError)) {
+            throw error;
+          }
+
+          plan.response = { ok: false, error };
+        }
+
+        return plan;
+      },
+    );
+
+    if (!result.ok) {
+      throw result.error;
+    }
+
+    if (!('session' in result.value)) {
+      throw new Error('Invalid demo result');
+    }
+
+    return { session: result.value.session, serverNow: result.value.serverNow };
+  }
+  async resetDemo() {
+    if (!this.fence) {
+      fail('UNAUTHORIZED');
+    }
+
+    const generation = randomUUID();
+    const root = this.fence.key.slice(0, -'generation:v1'.length);
+    const nextPrefix = root + `generation:${generation}:`;
+    const definitions = (
+      await Promise.all(
+        (await this.seeds.listEvents()).map((event) =>
+          this.seeds.listListings(event.id),
+        ),
+      )
+    ).flat();
+    const documents: InventoryDocument[] = definitions.map((listing) => ({
+      schemaVersion: 2,
+      eventId: listing.eventId,
+      version: 1,
+      listings: { [listing.id]: listing },
+      reservations: {},
+      soldQuantity: 0,
+      soldSeats: [],
+    }));
+    const changed = await this.redis.eval<number>(
+      RESET_LUA,
+      [
+        this.fence.key,
+        ...definitions.map(
+          (listing) => nextPrefix + 'inventory:v2:' + listing.id,
+        ),
+      ],
+      [
+        JSON.stringify({
+          expected: this.fence.generation,
+          generation,
+          values: documents,
+        }),
+      ],
+    );
+
+    if (Number(changed) !== 1) {
+      fail('VERSION_CONFLICT');
+    }
+
+    // The generation switch already invalidated all old reads and writes. Reclaim
+    // only its retired keys in bounded batches; never scan/delete another tenant.
+    let cursor = '0';
+
+    do {
+      const scanned = parse(
+        await this.redis.eval<{ cursor: string; keys: string[] } | string>(
+          "local r=redis.call('SCAN',ARGV[1],'MATCH',ARGV[2],'COUNT',100) return cjson.encode({cursor=r[1],keys=r[2]})",
+          [],
+          [cursor, this.prefix + '*'],
+        ),
+      );
+
+      cursor = scanned.cursor;
+      const candidates = Array.isArray(scanned.keys) ? scanned.keys : [];
+      const keys = candidates.filter((key) =>
+        ['session:v2:', 'completed:v2:', 'order:v2:', 'inventory:v2:'].some(
+          (kind) => key.startsWith(this.prefix + kind),
+        ),
+      );
+
+      if (keys.length) {
+        await this.redis.eval(
+          "return redis.call('UNLINK',unpack(KEYS))",
+          keys,
+          [],
+        );
+      }
+    } while (cursor !== '0');
+  }
   async execute(
     command: CheckoutCommand,
     policy: CheckoutPolicy,
   ): Promise<Result<CheckoutMutation>> {
     validateCheckoutPolicy(policy);
 
-    // Deadline edits have no production authorization implementation before Wave 05.
+    // The generic checkout executor stays closed to demo edits. The dedicated
+    // DemoService/mutateDemo path authenticates and validates those operations.
     if (command.kind === 'CHANGE_DEADLINE') {
       return {
         ok: false,
@@ -1009,7 +1289,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           {
             now,
             currentQuote: quoteSelection(
-              this.find(s, current.listingId).listing,
+              this.effectiveListing(s, current),
               allocationQuantity(current.allocation),
             ),
             ownsReservation:
@@ -1040,14 +1320,30 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           key,
           status: 'PROCESSING',
           ordinal: decision.session.paymentAttemptCount,
+          ...(s.index.demo[id]?.nextPayment &&
+          s.index.demo[id]!.nextPayment !== 'DEFAULT'
+            ? {
+                simulation: s.index.demo[id]!.nextPayment as Exclude<
+                  DemoConfiguration['nextPayment'],
+                  'DEFAULT'
+                >,
+              }
+            : {}),
         };
 
         if (decision.session.status !== 'PROCESSING') {
           throw new Error('Invalid claim decision');
         }
 
+        const simulation = s.index.attempts[command.attemptId]!.simulation;
+
+        if (s.index.demo[id]) {
+          s.index.demo[id]!.nextPayment = 'DEFAULT';
+        }
+
         plan.response = pass({
           ...updated(decision.session),
+          ...(simulation ? { simulation } : {}),
           kind: 'CLAIMED',
           session: decision.session,
         });
@@ -1187,7 +1483,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       }
 
       const quote = quoteSelection(
-        this.find(s, current.listingId).listing,
+        this.effectiveListing(s, current),
         allocationQuantity(current.allocation),
       );
       const decision =

@@ -231,3 +231,14 @@ mandatory braces or semantic section spacing, so these rules live in
 Prettier options. Both `format:check` and `lint` are required by `check`/CI.
 The existing source was reformatted for human review. No business-domain or
 persistence behavior was refactored as part of formatting.
+
+### Wave 05 developer scenarios
+
+Set server-only `DEMO_MODE=true` and a strong `DEMO_SECRET` in an isolated demo
+namespace to enable Developer menu. Unlock each checkout/device with that secret.
+The desktop Popover and mobile Sheet control persisted session pricing, 1–30 minute
+hold duration, immediate expiration, and a one-shot next-payment outcome. Reset is
+namespace-wide, requires typed confirmation, and fences old in-flight requests.
+Keep demo mode disabled on unrestricted production; hiding the menu is not its
+security boundary. See [developer control contracts](docs/DEVELOPER_CONTROLS.md)
+for endpoints, authorization, reset behavior, and hosted validation instructions.

@@ -324,6 +324,9 @@ export class CheckoutApplication implements CheckoutService {
         attemptId: processing.attemptId,
         attemptNumber: processing.paymentAttemptCount,
         quote: processing.quote,
+        ...(claim.value.simulation
+          ? { simulation: claim.value.simulation }
+          : {}),
       });
     } catch {
       outcome = { kind: 'UNKNOWN' };

@@ -1,3 +1,7 @@
+import { DemoService } from '../../application/demo';
+import { DEFAULT_CHECKOUT_POLICY } from '../../domain/checkout';
+import { DemoHttpApi } from '../http/demo-api';
+import { SNAPSHOT_LUA } from '../redis/transactions';
 import { randomUUID } from 'node:crypto';
 import { CheckoutApplication } from '../../application/checkout';
 import type { Analytics, Payment } from '../../application/ports';
@@ -22,7 +26,18 @@ export async function composeCheckout(options: {
   policy?: CheckoutPolicy;
   analytics?: Analytics;
   replayRetentionMs?: number;
+  demoEnabled?: boolean;
+  demoSecret?: string;
 }) {
+  const generationKey = `checkout:{${options.namespace}}:generation:v1`;
+  const raw = await options.redis.eval<{ raw: string[] } | string>(
+    SNAPSHOT_LUA,
+    [generationKey],
+    [],
+  );
+  const observed =
+    typeof raw === 'string' ? (JSON.parse(raw) as { raw: string[] }) : raw;
+  const generation = observed.raw[0] || 'base';
   const seeds = new FixtureCatalog();
   const store = new RedisCheckoutStore(
     options.redis,
@@ -31,6 +46,7 @@ export async function composeCheckout(options: {
     options.replayRetentionMs === undefined
       ? undefined
       : { replayMs: options.replayRetentionMs },
+    { key: generationKey, generation },
   );
 
   await store.initialize();
@@ -63,5 +79,17 @@ export async function composeCheckout(options: {
     cookies: new CallerCookies(options.callerSecret, options.secureCookies),
   });
 
-  return { checkout, api, store, catalog };
+  const demo = new DemoService(
+    store,
+    options.policy ?? DEFAULT_CHECKOUT_POLICY,
+    options.demoEnabled ?? false,
+  );
+  const demoApi = new DemoHttpApi(demo, api, {
+    enabled: options.demoEnabled ?? false,
+    secret: options.demoSecret ?? '',
+    secure: options.secureCookies,
+    scope: store.prefix,
+  });
+
+  return { checkout, api, store, catalog, demo, demoApi };
 }

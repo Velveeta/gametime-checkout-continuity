@@ -1,3 +1,4 @@
+import type { DemoPayment } from './demo';
 import type {
   CheckoutEventName,
   CheckoutPolicy,
@@ -52,6 +53,7 @@ export interface Payment {
     readonly attemptId: AttemptId;
     readonly attemptNumber: 1 | 2 | 3;
     readonly quote: PriceQuote;
+    readonly simulation?: Exclude<DemoPayment, 'DEFAULT'>;
   }): Promise<PaymentOutcome>;
 }
 
@@ -150,6 +152,7 @@ export type CheckoutMutation =
   | (MutationSnapshot & { readonly kind: 'UPDATED' | 'IN_PROGRESS' | 'REPLAY' })
   | (MutationSnapshot & {
       readonly kind: 'CLAIMED';
+      readonly simulation?: Exclude<DemoPayment, 'DEFAULT'>;
       readonly session: Extract<CheckoutSession, { status: 'PROCESSING' }>;
     })
   | (MutationSnapshot & {

@@ -15,6 +15,7 @@ import type { PaymentScenario } from '../../src/infrastructure/payment/simulator
 
 export async function startHttpEnvironment(
   scenarios: PaymentScenario[] = ['SUCCESS', 'SUCCESS'],
+  options: { demoMode?: boolean } = {},
 ) {
   const run = promisify(execFile);
   const redis = new RedisHarness();
@@ -166,7 +167,8 @@ export async function startHttpEnvironment(
             CHECKOUT_NAMESPACE: namespace,
             CHECKOUT_CALLER_SECRET: callerSecret,
             CHECKOUT_COMPLETION_SECRET: completionSecret,
-            DEMO_MODE: scenario === 'SUCCESS' ? 'false' : 'true',
+            DEMO_MODE:
+              options.demoMode || scenario !== 'SUCCESS' ? 'true' : 'false',
             DEMO_SECRET: 'test-only-demo-configuration-'.repeat(3),
             PAYMENT_SCENARIO: scenario,
           },

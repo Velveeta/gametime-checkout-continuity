@@ -757,7 +757,10 @@ describe('real Redis checkout transactions across independent instances', () => 
     expect(commits[0]!.keys).not.toContain(
       b.store.receiptKey(bSession.session.id),
     );
-    expect(commits[0]!.keys).toHaveLength(3); // one inventory, checkout and absent completion receipt
+    // The reset fence is read-only during purchases; independent listing writes
+    // still neither compare nor invalidate each other's history.
+    expect(commits[0]!.keys).toHaveLength(4);
+    expect(commits[0]!.keys).toContain(`checkout:{${namespace}}:generation:v1`);
   });
   it('retries a conflicting listing price publish before rejecting stale completion', async () => {
     const a = await instance();
@@ -850,7 +853,7 @@ describe('real Redis checkout transactions across independent instances', () => 
   });
   it('retains durable sales, one-order fences and authorized replay after actual metadata GC', async () => {
     const a = await instance({
-      policy: { holdMs: 200, processingMs: 50, retentionAfterExpiryMs: 150 },
+      policy: { holdMs: 1500, processingMs: 500, retentionAfterExpiryMs: 1000 },
       replayRetentionMs: 100,
     });
     const s = await create(a);

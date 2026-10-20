@@ -19,15 +19,18 @@ import { PriceBreakdown } from '@/components/marketplace/ticket-summary';
 import { Assurance } from '@/components/marketplace/chrome';
 import { Countdown } from './countdown';
 import { ShareCheckout } from './share-checkout';
+import { DeveloperMenu } from './developer-menu';
 import { useCheckout } from './use-checkout';
 import { money } from '@/lib/ui/presentation';
 
 export function CheckoutExperience({
   initial,
   summary,
+  demoEnabled = false,
 }: {
   initial: CheckoutSnapshot;
   summary: ReactNode;
+  demoEnabled?: boolean;
 }) {
   const id = initial.session.id;
   const {
@@ -85,6 +88,7 @@ export function CheckoutExperience({
           Secure checkout
         </span>
       </div>
+      {demoEnabled && <DeveloperMenu snapshot={query.data} />}
       <div className="checkout-grid">
         <section className="checkout-actions" aria-label="Checkout actions">
           {processing ? (

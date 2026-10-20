@@ -195,6 +195,10 @@ test('mobile uses the same session, stacks summary, offers a QR and copy link', 
 }) => {
   const a = await pageOn(browser);
   const id = await reserve(a.page, a.base);
+
+  await expect(
+    a.page.getByRole('button', { name: 'Developer menu', exact: true }),
+  ).toHaveCount(0);
   const b = await pageOn(browser, 1, true);
 
   await b.page.goto(b.base + `/checkout/${id}`);
@@ -462,7 +466,8 @@ test('three transient attempts exhaust without a fourth payment action', async (
 test('processing protects inventory past the business deadline and resolves at its own deadline', async ({
   browser,
 }) => {
-  const s = await shortCheckout(2500);
+  // Leave enough time for real SSR/hydration/claim work on a busy test host.
+  const s = await shortCheckout(15_000);
   const a = await pageOn(browser, 5);
 
   await a.page.goto(a.base + `/checkout/${s.session.id}`);

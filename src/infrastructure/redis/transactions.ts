@@ -1,7 +1,12 @@
 /** All authoritative reads use primary-routed EVAL and explicit same-slot KEYS. */
 export const SNAPSHOT_LUA = String.raw`
+local count=#KEYS
+if ARGV[1] then
+  if (redis.call('GET',KEYS[count]) or 'base')~=ARGV[1] then return cjson.encode({stale=true}) end
+  count=count-1
+end
 local values={}
-for i,key in ipairs(KEYS) do values[i]=redis.call('GET',key) or '' end
+for i=1,count do local key=KEYS[i] values[i]=redis.call('GET',key) or '' end
 local t=redis.call('TIME')
 return cjson.encode({raw=values,nowMs=tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000)})
 `;
@@ -11,7 +16,12 @@ return cjson.encode({raw=values,nowMs=tonumber(t[1])*1000+math.floor(tonumber(t[
  */
 export const COMMIT_LUA = String.raw`
 local p=cjson.decode(ARGV[1])
-for i,key in ipairs(KEYS) do
+local count=#KEYS
+if p.generation then
+  if (redis.call('GET',KEYS[count]) or 'base')~=p.generation then return cjson.encode({stale=true}) end
+  count=count-1
+end
+for i=1,count do local key=KEYS[i]
   if (redis.call('GET',key) or '')~=p.expected[i] then return cjson.encode({committed=false}) end
 end
 local t=redis.call('TIME')
@@ -25,6 +35,10 @@ for _,a in ipairs(p.relative) do
     s.reservationExpiresAt=now+a.holdMs
     s.recoveryRetainUntil=s.reservationExpiresAt+a.retentionMs
     r.createdAtMs=now
+    r.expiresAtMs=s.reservationExpiresAt
+  elseif a.mode=='DEADLINE' then
+    s.reservationExpiresAt=now+a.holdMs
+    s.recoveryRetainUntil=s.reservationExpiresAt+a.retentionMs
     r.expiresAtMs=s.reservationExpiresAt
   else
     s.processingDeadlineAt=now+a.processingMs
@@ -52,7 +66,7 @@ end
 local encodedResponse=cjson.encode({committed=true,response=response})
 local writes={}
 local expirations={}
-for i,key in ipairs(KEYS) do
+for i=1,count do local key=KEYS[i]
   local value=p.values[i]
   if p.changed[i] and value and value~=cjson.null then
     local encoded=cjson.encode(value)
@@ -74,6 +88,7 @@ return encodedResponse
 /** One-time bounded catalog work, with no checkout-wide CAS dependency. */
 export const SEED_LUA = String.raw`
 local p=cjson.decode(ARGV[1])
+if p.generation and (redis.call('GET',KEYS[#KEYS]) or 'base')~=p.generation then return cjson.encode({seeded=false,error='Retired demo generation'}) end
 for i=1,p.legacyCount do
   if redis.call('EXISTS',KEYS[i])==1 then return cjson.encode({seeded=false,error='Legacy v1 data requires migration or a new isolated CHECKOUT_NAMESPACE'}) end
 end
@@ -91,4 +106,19 @@ for i,value in ipairs(p.values) do
 end
 if #missing>0 then redis.call('MSET',unpack(missing)) end
 return cjson.encode({seeded=true})
+`;
+
+/** Reset publishes all fresh fixture inventories and the routing fence together.
+ * Old workers compare this fence in every snapshot/commit, including settlement.
+ */
+export const RESET_LUA = String.raw`
+local p=cjson.decode(ARGV[1])
+if (redis.call('GET',KEYS[1]) or 'base')~=p.expected then return 0 end
+local writes={KEYS[1],p.generation}
+for i,value in ipairs(p.values) do
+  table.insert(writes,KEYS[i+1])
+  table.insert(writes,cjson.encode(value))
+end
+redis.call('MSET',unpack(writes))
+return 1
 `;

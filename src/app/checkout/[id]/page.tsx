@@ -1,3 +1,4 @@
+import { parseServerEnv } from '@/lib/env';
 import { randomUUID } from 'node:crypto';
 import { redirect, notFound } from 'next/navigation';
 import { checkoutRuntime } from '@/lib/checkout-runtime';
@@ -59,6 +60,7 @@ export default async function CheckoutPage({
         <CheckoutExperience
           key={id}
           initial={entry.snapshot}
+          demoEnabled={parseServerEnv(process.env).DEMO_MODE}
           summary={
             <TicketSummary event={event} allocation={session.allocation} />
           }
