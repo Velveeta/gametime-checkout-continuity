@@ -67,8 +67,9 @@ reservation + session creation and sale + order creation in single Lua execution
 Validate all conditions before writes: Redis scripts isolate execution but do not
 roll back earlier writes after an error.
 
-Wave 02 must add the atomic completion claim and separate processing deadline,
-then lock the claimed quote/attempt. The core recognizes a future
+Wave 02 defines the completion claim, processing deadline and locked quote/attempt
+in domain rules. Wave 03 must implement those atomic effects in Redis; see
+`docs/CHECKOUT_ATOMICITY.md`. The core recognizes a future
 `processingDeadlineMs` on a HELD record but provides no method to set it yet.
 Only that claim may establish payment protection; regular reads/replays must not.
 Current sale primitives only require a live owned hold, so the future composition

@@ -41,7 +41,7 @@ export class RedisInventory implements ReservationRepository {
     options: { namespace: string; holdDurationMs?: number }) {
     identifier(options.namespace);
     this.prefix = `checkout:{${options.namespace}}:inventory:`;
-    this.holdDurationMs = options.holdDurationMs ?? 5 * 60_000;
+    this.holdDurationMs = options.holdDurationMs ?? 10 * 60_000;
     if (!Number.isSafeInteger(this.holdDurationMs) || this.holdDurationMs < 100 || this.holdDurationMs > 30 * 60_000) {
       throw new RangeError("Hold policy must be 100ms–30min (server configuration only)");
     }

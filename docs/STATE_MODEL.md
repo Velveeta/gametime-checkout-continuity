@@ -1,7 +1,7 @@
-# Checkout state model — Wave 00 contracts
+# Checkout state model — Wave 02 domain rules
 
-This document defines later implementations; no lifecycle service or persistence
-adapter exists yet. `src/domain/models.ts` is the canonical shape;
+The lifecycle domain and application service now exist. Production checkout
+persistence remains deferred to Wave 03; see `docs/CHECKOUT_ATOMICITY.md`. `src/domain/models.ts` is the canonical shape;
 `src/application/ports.ts` defines atomic boundaries and
 `src/application/checkout-service.ts` defines caller-facing service contracts.
 
@@ -28,12 +28,12 @@ Type assertions or persisted JSON cannot replace that validation.
 | --- | --- | --- |
 | No session | Current listing/version, valid selection, availability | ACTIVE; reserve selected inventory and create session together |
 | ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Higher current quote while live | PRICE_REVIEW; invalidate previous acceptance |
-| ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Lower current quote while live | Auto-apply; ACTIVE (or PAYMENT_RETRYABLE if prior transient failure); show positive price message |
+| ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Lower current quote while live | Auto-apply lower quote and show positive message; remain PRICE_REVIEW if still above acceptedTotal, otherwise ACTIVE/PAYMENT_RETRYABLE |
 | PRICE_REVIEW | Accept exact current quote version and session CAS while live | ACTIVE or PAYMENT_RETRYABLE according to prior attempts; acknowledge exact version |
 | ACTIVE, PAYMENT_RETRYABLE | Current owned reservation, now < business deadline, current quote accepted if increased, attempts < 3 | PROCESSING; increment attempt once, create attempt ID and separate processing deadline |
 | PROCESSING | Successful result for matching claimed attempt before processing deadline | COMPLETED; create one order and sell inventory atomically |
 | PROCESSING | Confirmed transient failure, attempts < 3, business reservation still live | PAYMENT_RETRYABLE; remove processing protection, retain original reservation deadline |
-| PROCESSING | Confirmed transient failure after business deadline | EXPIRED; release inventory |
+| PROCESSING | Confirmed transient failure after business deadline, attempts < 3 | EXPIRED; release inventory |
 | PROCESSING | Decline, third transient failure, or processing timeout | PAYMENT_FAILED; release inventory |
 | ACTIVE, PRICE_REVIEW, PAYMENT_RETRYABLE | now >= reservationExpiresAt | EXPIRED; release inventory |
 | EXPIRED | Fresh-navigation recovery with retained metadata and current availability | Create ONE new ACTIVE session/reservation and link recovery atomically; original remains EXPIRED |
@@ -86,11 +86,17 @@ real payment gateway reconciliation is explicitly out of scope.
   confirmation. EXPIRED is terminal for its original reservation; it has only the
   explicit recovery exception above.
 
-Completion capabilities are unguessable, scoped to one order, stored as digests,
-and returned solely to the successful initiating caller at atomic settlement.
-They are absent from shared snapshots, analytics, ordinary reads and public
-checkout URLs. Session-ID knowledge cannot authorize order confirmation or
-recover a capability. Concurrent losers and duplicate settlement calls get no
-capability. Future HTTP transport must use a secure caller-bound mechanism
-(e.g. HttpOnly cookie), never a capability in a URL. Lost response/capability
-recovery and real authentication are outside this prototype's scope.
+Completion capabilities are unguessable and scoped to one order; only their digests
+are persisted. Initial settlement or an authorized replay grant to the same
+initiating caller/idempotency key permits the application to derive the bearer.
+Other caller bindings/keys cannot recover it. Tokens are absent from shared
+snapshots, analytics and public checkout URLs; session-ID knowledge does not
+permit confirmation. Use secure caller-bound HTTP transport in Wave 03, never a
+capability in a URL. Confirmation is refreshable with the capability. Production
+caller authentication and Redis ledger/digest persistence are not implemented yet.
+
+`getSession`/`read` project expiry without mutations or recovery. Explicit
+`reconcile` commits due fencing/release via the atomic repository contract.
+Default hold is 10 minutes; recovery metadata lasts 30 minutes after expiration;
+processing protection defaults to 60 seconds. The application clock is telemetry
+only, while each repository operation must obtain authoritative server time.

@@ -41,7 +41,7 @@ export interface PriceQuote {
   readonly version: Version;
 }
 
-interface SessionBase {
+export interface SessionBase {
   readonly id: SessionId;
   readonly eventId: EventId;
   readonly listingId: ListingId;
@@ -51,13 +51,14 @@ interface SessionBase {
   readonly reservationExpiresAt: Instant;
   readonly recoveryRetainUntil: Instant;
   readonly version: Version;
+  /** Total currently authorized; pending increases must not raise it. */
+  readonly acceptedTotal: Cents;
   readonly acknowledgedQuoteVersion?: Version;
   readonly paymentAttemptCount: 0 | 1 | 2 | 3;
   readonly createdAt: Instant;
 }
 
-type IdleSession = SessionBase & {
-  readonly status: "ACTIVE" | "PRICE_REVIEW";
+type IdleSession = SessionBase & ({ readonly status: "ACTIVE" } | { readonly status: "PRICE_REVIEW" }) & {
   readonly paymentAttemptCount: 0 | 1 | 2;
   readonly processingDeadlineAt?: never;
   readonly orderId?: never;
@@ -96,6 +97,7 @@ type CompletedSession = SessionBase & {
 
 type ExpiredSession = SessionBase & {
   readonly status: "EXPIRED";
+  readonly successorSessionId?: SessionId;
   readonly processingDeadlineAt?: never;
   readonly orderId?: never;
 };

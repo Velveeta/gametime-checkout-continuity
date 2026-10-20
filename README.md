@@ -31,7 +31,8 @@ Open http://localhost:3000. This wave renders a server-authored foundation page,
 with a minimal client-side Query provider and a shadcn-compatible Radix Slot
 button. The disabled browse button intentionally has no purchase behavior.
 At Wave 00 there was no catalog or Redis adapter. Wave 01 adds those as internal
-services; checkout routes, HTTP APIs and payment integration remain unimplemented.
+services. Wave 02 adds framework-independent checkout orchestration and a payment
+simulator; production checkout persistence, routes and HTTP APIs remain unimplemented.
 No Redis account or secret is required to run the scaffold page.
 
 CI-friendly checks (noninteractive, fail on lint warnings):
@@ -122,10 +123,39 @@ For future server composition, `createDemoInventory(namespace)` validates the
 existing Upstash REST environment configuration and returns an adapter without
 connecting or initializing on import. Explicit `initialize()` seeds missing event
 aggregates; it never overwrites existing holds, sold units or orders. Hold policy
-is server-owned (five minutes by default). No seeding HTTP endpoint, reset command,
+is server-owned (aligned to ten minutes in Wave 02). No seeding HTTP endpoint, reset command,
 or dependency on live credentials is introduced here.
 
 Security audit follow-up: the previously discussed `braces` advisory propagates
 through the Next ESLint development dependencies. Do not force-downgrade the Next
 lint configuration. Track the upstream fix; `npm audit --omit=dev` distinguishes
 the production dependency audit, and does not mean dev dependencies are fixed.
+
+
+## Wave 02 — checkout domain and application services
+
+`src/domain/checkout.ts` implements fixed-deadline state transitions, complete-total
+price review, retry limits, independent processing protection, expiry and recovery.
+`src/application/checkout.ts` orchestrates injected atomic repository operations and
+a deterministic payment simulator. `getSession` is read-only; fresh navigation is
+the only automatic recovery entrypoint. `reconcile` is the explicit expiry/timeout
+mutation. Defaults: hold 10 minutes, processing 60 seconds, metadata retention
+30 minutes after hold expiration. Snapshot times come from the repository server.
+
+`acceptedTotal` prevents a reduced pending increase from charging more than was
+accepted. Completion now requires an idempotency key and trusted caller binding;
+only the original binding gets a stable capability on successful replay. A
+server-secret HMAC authority is implemented; no secret is embedded or configured
+by default. Confirmation reads require a capability and can be refreshed.
+
+**No production checkout Redis adapter is wired in this wave.** Application tests
+use a clearly separated test-only transaction model. The existing real-Redis
+inventory tests remain separate. Passing model contention tests does not establish
+production checkout concurrency safety or durability. See
+`docs/CHECKOUT_ATOMICITY.md` for the required Wave 03 transactions, authentication,
+secret setup and processing-timeout assumptions. No HTTP/UI or developer control
+was added. The app still renders its foundation page.
+
+Run `npm test` for unit/domain/application/model tests, `npm run test:integration`
+for standalone real-Redis inventory tests, or `npm run check` for both plus lint,
+strict types and production build. Local Redis binary prerequisites are unchanged.
