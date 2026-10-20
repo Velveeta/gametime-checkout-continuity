@@ -93,7 +93,7 @@ export class RedisHarness implements RedisScriptExecutor {
   }
   async after(deadline: string) {
     const target = Date.parse(deadline);
-    for (let attempt = 0; attempt < 200; attempt++) {
+    for (let attempt = 0; attempt < 1500; attempt++) {
       const [seconds, micros] = (await this.command('TIME'))
         .split('\n')
         .map(Number);

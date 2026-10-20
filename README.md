@@ -199,3 +199,28 @@ uses a test-only TLS REST bridge backed by real Redis. Hosted verification is
 separate and was not run without credentials: export `.env.local` and run
 `npm run test:upstash`. Its generated test namespace is isolated and cleaned up.
 No website has been deployed or pushed to GitHub.
+
+## Wave 04 — shopping and responsive checkout
+
+Event discovery, event listings, checkout and protected booking confirmation now
+have a complete responsive interface with locally bundled event imagery. Checkout
+summary content is rendered on the server before hydration. TanStack Query polls
+live checkout/inventory state approximately every two seconds; a local countdown
+uses authoritative server timestamps and monotonic elapsed time. QR/copy/native
+sharing opens the same hold on another device.
+
+Price review, savings, processing protection, retryable/nonretryable outcomes and
+device-specific completion navigation use the existing APIs. No developer menu or
+scenario-mutation endpoint was added. See `docs/UI_INTEGRATION.md` for the UI
+contracts, transport correction, local validation and Wave 05 considerations.
+
+Install browser binaries with `npx playwright install --with-deps chromium`, then
+run `npm run check` (Redis and openssl prerequisites still apply). Browser tests
+use isolated real Redis plus built Next servers and require no hosted credentials.
+`npm run test:browser` requires a production build first. Homepage discovery works
+without configuration; reserving tickets requires the documented Redis runtime.
+
+Prettier uses the supplied 80-column, two-space, single-quote configuration.
+`npm run format` formats source; `npm run format:check` is required by `check`/CI.
+The existing source was reformatted for human review. No business-domain or
+persistence behavior was refactored as part of formatting.

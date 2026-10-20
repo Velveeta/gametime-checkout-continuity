@@ -163,9 +163,7 @@ export interface CheckoutRepository {
   /** Read-only effective quote snapshot + serverNow; no writes/recovery/hold extension.
    * Service projects due expiry for display. Mutations reconcile + persist it.
    */
-  read(
-    id: SessionId,
-  ): Promise<{
+  read(id: SessionId): Promise<{
     readonly session: CheckoutSession;
     readonly serverNow: Instant;
   } | null>;

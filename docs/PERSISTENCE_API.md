@@ -14,8 +14,8 @@ lock is used. Existing test-only in-memory reference adapters remain available.
 records without overwriting existing data. Static builds require no credentials.
 Public JSON handlers delegate to `CheckoutHttpApi`, which validates and transports
 requests to framework-independent application/domain services. The SSR checkout
-page invokes services directly. Its minimal server HTML is only a Wave 04 seam;
-responsive checkout interactions and event/confirmation pages are still pending.
+page invokes services directly. Wave 04 adds the responsive shopping and checkout
+interface, live synchronization and protected confirmation page; see `UI_INTEGRATION.md`.
 
 ## Key layout and scoped optimistic transactions
 
@@ -183,9 +183,9 @@ completed-order grant. Do not expose tokens in query strings or client storage.
 SSR `/checkout/:id` invokes fresh-navigation policy directly: active/processing
 state renders initial HTML; completed/terminal failed/missing state redirects
 home; expired retained metadata attempts one successor, otherwise event/root.
-The event and responsive confirmation pages are Wave 04 work. JSON polling must
+The event and protected confirmation pages are implemented in Wave 04. JSON polling must
 handle 410 by event navigation; it must not call recover. Disable checkout-link
-prefetching in Wave 04 so speculative rendering cannot request fresh recovery.
+prefetching so speculative rendering cannot request fresh recovery.
 
 ## Runtime environment and local setup
 
@@ -208,8 +208,9 @@ API returns 503; static homepage/build remains usable without live credentials.
 
 ## Verified tests and hosted validation
 
-`npm run check` runs lint, types, unit tests, real local Redis integration tests,
-production build, then a built-HTTP test. Local tests require redis-server/redis-cli
+`npm run check` runs formatting, lint, types, unit tests, real local Redis integration
+tests, production build, built-HTTP tests and Playwright. Browser setup is documented
+in `UI_INTEGRATION.md`. Local tests require redis-server/redis-cli
 
 > =6.2 plus openssl on PATH (or REDIS_SERVER/REDIS_CLI absolute binary paths).
 > On macOS: `brew install redis openssl`. No local service needs to be started.

@@ -94,8 +94,16 @@ export class CheckoutHttpApi {
   constructor(private readonly services: HttpDependencies) {}
   private async body<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
     const origin = request.headers.get('origin');
+    // Next may reconstruct request.url with its internal listening hostname.
+    // The browser's Host header describes the public origin. Do not trust an
+    // arbitrary X-Forwarded-Host or allow the internal hostname as an alternative.
+    const url = new URL(request.url);
+    const host = request.headers.get('host');
+    const requestOrigin = host
+      ? new URL(`${url.protocol}//${host}`).origin
+      : url.origin;
     if (
-      (origin && origin !== new URL(request.url).origin) ||
+      (origin && origin !== requestOrigin) ||
       request.headers.get('sec-fetch-site') === 'cross-site'
     )
       throw new HttpError('UNAUTHORIZED', 'Cross-origin mutation rejected');

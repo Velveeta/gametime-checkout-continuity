@@ -179,6 +179,39 @@ describe('HTTP transport with production services and actual Redis', () => {
       ).toBe(200);
     expect(await redis.command('GET', key)).toBe(before);
   });
+  it('validates the browser Host origin when Next uses an internal request URL', async () => {
+    const body = {
+      eventId: listing.eventId,
+      listingId: listing.id,
+      allocation: selected,
+      expectedListingVersion: 1,
+    };
+    const response = await runtime.api.create(
+      new Request('http://localhost:3000/api/checkouts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'checkout.example:3000',
+          Origin: 'http://checkout.example:3000',
+          'Sec-Fetch-Site': 'same-origin',
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(response.status).toBe(201);
+    const rejected = await runtime.api.create(
+      new Request('http://localhost:3000/api/checkouts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Host: 'checkout.example:3000',
+          Origin: 'http://localhost:3000',
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+    expect(rejected.status).toBe(403);
+  });
   it('rejects cross-origin writes, missing keys, forged caller bindings and body-supplied callers', async () => {
     const a = await create();
     const path = `/api/checkouts/${a.id}/complete`;
