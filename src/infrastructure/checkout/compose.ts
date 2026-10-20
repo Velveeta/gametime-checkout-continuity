@@ -32,6 +32,7 @@ export async function composeCheckout(options: {
       ? undefined
       : { replayMs: options.replayRetentionMs },
   );
+
   await store.initialize();
   const catalog = {
     getEvent: seeds.getEvent.bind(seeds),
@@ -61,5 +62,6 @@ export async function composeCheckout(options: {
     inventory: store,
     cookies: new CallerCookies(options.callerSecret, options.secureCookies),
   });
+
   return { checkout, api, store, catalog };
 }

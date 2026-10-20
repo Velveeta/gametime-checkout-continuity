@@ -10,6 +10,7 @@ export class RequestError extends Error {
     super(message);
   }
 }
+
 export async function request<T>(
   url: string,
   options: RequestInit = {},
@@ -28,19 +29,26 @@ export async function request<T>(
     },
   });
   const body = (await response.json()) as ApiResponse<T>;
+
   if (!body.ok) {
-    if (allowExpired && response.status === 410 && body.data) return body.data;
+    if (allowExpired && response.status === 410 && body.data) {
+      return body.data;
+    }
+
     throw new RequestError(
       body.error.code,
       body.error.message,
       response.status,
     );
   }
+
   return body.data;
 }
+
 export interface LiveSnapshot extends CheckoutSnapshot {
   sample?: { serverMs: number; mono: number };
 }
+
 export async function readCheckout(
   id: string,
   signal?: AbortSignal,
@@ -52,6 +60,7 @@ export async function readCheckout(
     true,
   );
   const end = performance.now();
+
   return {
     ...snapshot,
     sample: {
@@ -60,6 +69,7 @@ export async function readCheckout(
     },
   };
 }
+
 export type PaymentResponse =
   | { kind: 'COMPLETED'; orderId: string; confirmationUrl: string }
   | { kind: 'IN_PROGRESS' | 'UPDATED'; snapshot: CheckoutSnapshot };
@@ -69,11 +79,13 @@ export interface SavedAttempt {
   quoteVersion: number;
 }
 const storageKey = (id: string) => `gametime:payment:${id}`;
+
 export function savedAttempt(id: string): SavedAttempt | null {
   try {
     const value = JSON.parse(
       sessionStorage.getItem(storageKey(id)) ?? 'null',
     ) as SavedAttempt | null;
+
     return value &&
       typeof value.key === 'string' &&
       /^[A-Za-z0-9-]{1,128}$/.test(value.key) &&
@@ -87,10 +99,14 @@ export function savedAttempt(id: string): SavedAttempt | null {
     return null;
   }
 }
+
 export function rememberAttempt(id: string, value: SavedAttempt | null) {
   try {
-    if (value) sessionStorage.setItem(storageKey(id), JSON.stringify(value));
-    else sessionStorage.removeItem(storageKey(id));
+    if (value) {
+      sessionStorage.setItem(storageKey(id), JSON.stringify(value));
+    } else {
+      sessionStorage.removeItem(storageKey(id));
+    }
   } catch {
     /* In-memory binding still protects this mounted page when storage is unavailable. */
   }

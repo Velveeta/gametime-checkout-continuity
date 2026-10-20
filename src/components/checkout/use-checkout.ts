@@ -1,4 +1,5 @@
 'use client';
+
 import { useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +15,7 @@ import {
   type PaymentResponse,
   type SavedAttempt,
 } from '@/lib/ui/http';
+
 const definitiveRejections = new Set([
   'VERSION_CONFLICT',
   'QUOTE_ACCEPTANCE_REQUIRED',
@@ -45,10 +47,12 @@ export function useCheckout(initial: CheckoutSnapshot) {
     refetchOnReconnect: true,
   });
   const { session } = query.data;
+
   const clearAttempt = () => {
     pending.current = null;
     rememberAttempt(id, null);
   };
+
   const update = (snapshot: CheckoutSnapshot) =>
     cache.setQueryData<LiveSnapshot>(key, {
       ...snapshot,
@@ -73,21 +77,30 @@ export function useCheckout(initial: CheckoutSnapshot) {
         confirmedHere.current = true;
         clearAttempt();
         router.replace(`/orders/${result.orderId}/confirmation`);
+
         return;
       }
+
       if (
         result.kind === 'UPDATED' &&
         result.snapshot.session.status !== 'PROCESSING'
-      )
+      ) {
         clearAttempt();
+      }
+
       update(result.snapshot);
       void cache.invalidateQueries({ queryKey: key });
     },
     onError: async (error) => {
       // A lost response may follow a successful commit. Retain the EXACT key/body
       // until a definitive non-claim response or the original receipt resolves it.
-      if (error instanceof RequestError && definitiveRejections.has(error.code))
+      if (
+        error instanceof RequestError &&
+        definitiveRejections.has(error.code)
+      ) {
         clearAttempt();
+      }
+
       await query.refetch();
     },
     onSettled: () => {
@@ -112,27 +125,43 @@ export function useCheckout(initial: CheckoutSnapshot) {
   });
   const mutate = payment.mutate;
   const isPaying = payment.isPending;
+
   useEffect(() => {
-    if (confirmedHere.current) return;
+    if (confirmedHere.current) {
+      return;
+    }
+
     if (
       query.error instanceof RequestError &&
       query.error.code === 'NOT_FOUND'
     ) {
       router.replace('/');
+
       return;
     }
+
     if (session.status === 'EXPIRED') {
       router.replace(`/events/${session.eventId}`);
+
       return;
     }
-    if (session.status !== 'COMPLETED') return;
+
+    if (session.status !== 'COMPLETED') {
+      return;
+    }
+
     // Only this tab's stored request can obtain a completion capability. A losing
     // device may have a pending key too; the server rejects it and redirects home.
     const own = pending.current ?? savedAttempt(id);
+
     if (!own) {
-      if (!isPaying) router.replace('/');
+      if (!isPaying) {
+        router.replace('/');
+      }
+
       return;
     }
+
     if (!isPaying && !terminalChecked.current) {
       terminalChecked.current = true;
       submitting.current = true;
@@ -152,8 +181,12 @@ export function useCheckout(initial: CheckoutSnapshot) {
   const confirmDeadline = useCallback(() => {
     void refetch();
   }, [refetch]);
+
   function pay() {
-    if (submitting.current || payment.isPending) return;
+    if (submitting.current || payment.isPending) {
+      return;
+    }
+
     submitting.current = true;
     const attempt = pending.current ??
       savedAttempt(id) ?? {
@@ -161,10 +194,12 @@ export function useCheckout(initial: CheckoutSnapshot) {
         expectedVersion: session.version,
         quoteVersion: session.quote.version,
       };
+
     pending.current = attempt;
     rememberAttempt(id, attempt);
     payment.mutate(attempt);
   }
+
   const unknownFailure =
     payment.error &&
     (!(payment.error instanceof RequestError) ||

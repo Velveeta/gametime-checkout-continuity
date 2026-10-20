@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Header, Footer } from '@/components/marketplace/chrome';
+
 export default function NotFound() {
   return (
     <>

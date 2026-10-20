@@ -25,39 +25,54 @@ export async function startHttpEnvironment(
   let directory = '';
   let bridge: Server | undefined;
   const bases: string[] = [];
+
   async function freePort() {
     return new Promise<number>((resolve, reject) => {
       const server = createServer();
+
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => {
         const a = server.address();
-        if (!a || typeof a === 'string') throw new Error();
+
+        if (!a || typeof a === 'string') {
+          throw new Error();
+        }
+
         server.close((error) => (error ? reject(error) : resolve(a.port)));
       });
     });
   }
 
   async function stop() {
-    for (const child of children)
+    for (const child of children) {
       if (child.exitCode === null) {
         const exited = new Promise<void>((resolve) =>
           child.once('exit', () => resolve()),
         );
+
         child.kill('SIGTERM');
         await exited;
       }
+    }
+
     if (bridge) {
       bridge.closeAllConnections();
       await new Promise<void>((resolve) => bridge!.close(() => resolve()));
     }
+
     await redis.stop();
-    if (directory) await rm(directory, { recursive: true, force: true });
+
+    if (directory) {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
+
   try {
     await redis.start();
     directory = await mkdtemp(join(tmpdir(), 'cc-http-'));
     const key = join(directory, 'key.pem');
     const cert = join(directory, 'cert.pem');
+
     await run('openssl', [
       'req',
       '-x509',
@@ -82,13 +97,21 @@ export async function startHttpEnvironment(
           if (request.headers.authorization !== 'Bearer local-protocol-test') {
             response.writeHead(401);
             response.end(JSON.stringify({ error: 'Unauthorized' }));
+
             return;
           }
+
           const chunks: Buffer[] = [];
-          for await (const chunk of request) chunks.push(Buffer.from(chunk));
+
+          for await (const chunk of request) {
+            chunks.push(Buffer.from(chunk));
+          }
+
           const body = JSON.parse(Buffer.concat(chunks).toString());
+
           const invoke = async (command: unknown[]) => {
             const raw = await redis.command(...command.map(String));
+
             return {
               result:
                 request.headers['upstash-encoding'] === 'base64'
@@ -96,9 +119,11 @@ export async function startHttpEnvironment(
                   : raw,
             };
           };
+
           const result = request.url?.startsWith('/pipeline')
             ? await Promise.all(body.map(invoke))
             : await invoke(body);
+
           response.setHeader('Content-Type', 'application/json');
           response.end(JSON.stringify(result));
         } catch {
@@ -108,12 +133,15 @@ export async function startHttpEnvironment(
       },
     );
     const bridgePort = await freePort();
+
     await new Promise<void>((resolve) =>
       bridge!.listen(bridgePort, '127.0.0.1', resolve),
     );
+
     for (const scenario of scenarios) {
       const port = await freePort();
       const base = `http://127.0.0.1:${port}`;
+
       bases.push(base);
       let logs = '';
       const child = spawn(
@@ -145,6 +173,7 @@ export async function startHttpEnvironment(
           stdio: ['ignore', 'pipe', 'pipe'],
         },
       );
+
       children.push(child);
       child.stdout?.on('data', (data) => {
         logs = (logs + data.toString()).slice(-10000);
@@ -153,6 +182,7 @@ export async function startHttpEnvironment(
         logs = (logs + data.toString()).slice(-10000);
       });
       let ready = false;
+
       for (let attempt = 0; attempt < 100; attempt++) {
         try {
           if ((await fetch(base)).status === 200) {
@@ -160,14 +190,23 @@ export async function startHttpEnvironment(
             break;
           }
         } catch {}
-        if (child.exitCode !== null) break;
+
+        if (child.exitCode !== null) {
+          break;
+        }
+
         await pause(50);
       }
-      if (!ready) throw new Error('Built Next server failed to start: ' + logs);
+
+      if (!ready) {
+        throw new Error('Built Next server failed to start: ' + logs);
+      }
     }
+
     return { redis, bases, namespace, callerSecret, completionSecret, stop };
   } catch (error) {
     await stop();
+
     throw error;
   }
 }

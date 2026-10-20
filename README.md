@@ -221,6 +221,13 @@ use isolated real Redis plus built Next servers and require no hosted credential
 without configuration; reserving tickets requires the documented Redis runtime.
 
 Prettier uses the supplied 80-column, two-space, single-quote configuration.
-`npm run format` formats source; `npm run format:check` is required by `check`/CI.
+`npm run format` runs ESLint autofixes, then Prettier. ESLint requires braces on
+every control-flow body and enforces 1TBS placement, including `} else {`.
+Blank lines separate imports from code, declaration groups from work, control-flow
+blocks, and returns/throws. Consecutive imports and declarations stay grouped;
+additional meaningful blank lines are preserved. Prettier has no settings for
+mandatory braces or semantic section spacing, so these rules live in
+`eslint.config.mjs` using `@stylistic/eslint-plugin` rather than unsupported
+Prettier options. Both `format:check` and `lint` are required by `check`/CI.
 The existing source was reformatted for human review. No business-domain or
 persistence behavior was refactored as part of formatting.

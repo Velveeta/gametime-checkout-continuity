@@ -42,23 +42,46 @@ const recoverSchema = z
   .object({ intent: z.literal('FRESH_NAVIGATION') })
   .strict();
 const keySchema = z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/);
+
 function status(code: ApiErrorCode) {
-  if (code === 'NOT_FOUND') return 404;
-  if (code === 'RESERVATION_EXPIRED' || code === 'PROCESSING_DEADLINE_EXCEEDED')
+  if (code === 'NOT_FOUND') {
+    return 404;
+  }
+
+  if (
+    code === 'RESERVATION_EXPIRED' ||
+    code === 'PROCESSING_DEADLINE_EXCEEDED'
+  ) {
     return 410;
-  if (code === 'UNAUTHORIZED' || code === 'INVALID_COMPLETION_CAPABILITY')
+  }
+
+  if (code === 'UNAUTHORIZED' || code === 'INVALID_COMPLETION_CAPABILITY') {
     return 403;
-  if (code === 'CALLER_REQUIRED') return 401;
+  }
+
+  if (code === 'CALLER_REQUIRED') {
+    return 401;
+  }
+
   if (
     code === 'INVALID_INPUT' ||
     code === 'INVALID_SELECTION' ||
     code === 'INVALID_QUOTE'
-  )
+  ) {
     return 400;
-  if (code === 'SERVICE_UNAVAILABLE') return 503;
-  if (code === 'UNSUPPORTED_MEDIA_TYPE') return 415;
+  }
+
+  if (code === 'SERVICE_UNAVAILABLE') {
+    return 503;
+  }
+
+  if (code === 'UNSUPPORTED_MEDIA_TYPE') {
+    return 415;
+  }
+
   return 409;
 }
+
 export function json<T>(body: ApiResponse<T>, code = 200) {
   return Response.json(body, {
     status: code,
@@ -69,9 +92,11 @@ export function json<T>(body: ApiResponse<T>, code = 200) {
     },
   });
 }
+
 export function apiFailure(code: ApiErrorCode, message: string) {
   return json({ ok: false, error: { code, message } }, status(code));
 }
+
 class HttpError extends Error {
   constructor(
     readonly code: ApiErrorCode,
@@ -102,46 +127,65 @@ export class CheckoutHttpApi {
     const requestOrigin = host
       ? new URL(`${url.protocol}//${host}`).origin
       : url.origin;
+
     if (
       (origin && origin !== requestOrigin) ||
       request.headers.get('sec-fetch-site') === 'cross-site'
-    )
+    ) {
       throw new HttpError('UNAUTHORIZED', 'Cross-origin mutation rejected');
+    }
+
     if (
       request.headers
         .get('content-type')
         ?.toLowerCase()
         .split(';')[0]
         ?.trim() !== 'application/json'
-    )
+    ) {
       throw new HttpError('UNSUPPORTED_MEDIA_TYPE', 'Use application/json');
+    }
+
     // Bounded stream read; Content-Length alone is not trusted.
     const reader = request.body?.getReader();
     const chunks: Uint8Array[] = [];
     let total = 0;
-    if (reader)
+
+    if (reader) {
       while (true) {
         const part = await reader.read();
-        if (part.done) break;
+
+        if (part.done) {
+          break;
+        }
+
         total += part.value.byteLength;
+
         if (total > 16_384) {
           await reader.cancel();
+
           throw new HttpError('INVALID_INPUT', 'Request body too large');
         }
+
         chunks.push(part.value);
       }
+    }
+
     const buffer = new Uint8Array(total);
     let offset = 0;
+
     for (const chunk of chunks) {
       buffer.set(chunk, offset);
       offset += chunk.length;
     }
+
     let value: unknown;
+
     try {
       value = JSON.parse(new TextDecoder().decode(buffer));
     } catch {
       throw new HttpError('INVALID_INPUT', 'Malformed JSON');
     }
+
     return schema.parse(value);
   }
   private key(request: Request) {
@@ -153,23 +197,31 @@ export class CheckoutHttpApi {
       : apiFailure(result.error.code, result.error.message);
   }
   private callerCookie(request: Request, response: Response) {
-    if (!this.services.cookies.read(request))
+    if (!this.services.cookies.read(request)) {
       response.headers.append('Set-Cookie', this.services.cookies.create());
+    }
+
     return response;
   }
   async handle(action: () => Promise<Response>): Promise<Response> {
     try {
       return await action();
     } catch (error) {
-      if (error instanceof HttpError)
+      if (error instanceof HttpError) {
         return apiFailure(error.code, error.message);
-      if (error instanceof DomainError)
+      }
+
+      if (error instanceof DomainError) {
         return apiFailure(error.code, error.message);
-      if (error instanceof z.ZodError)
+      }
+
+      if (error instanceof z.ZodError) {
         return apiFailure(
           'INVALID_INPUT',
           'Input does not match the API schema',
         );
+      }
+
       return apiFailure(
         'SERVICE_UNAVAILABLE',
         'Checkout service is temporarily unavailable',
@@ -191,6 +243,7 @@ export class CheckoutHttpApi {
     return this.handle(async () => {
       identifierSchema.parse(id);
       const event = await this.services.catalog.getEvent(id);
+
       return event
         ? json({
             ok: true,
@@ -202,8 +255,11 @@ export class CheckoutHttpApi {
   listings(id: string) {
     return this.handle(async () => {
       identifierSchema.parse(id);
-      if (!(await this.services.catalog.getEvent(id)))
+
+      if (!(await this.services.catalog.getEvent(id))) {
         return apiFailure('NOT_FOUND', 'Event not found');
+      }
+
       const listings = await this.services.catalog.listListings(id);
       const rows = await Promise.all(
         listings.map(async (listing) => ({
@@ -213,6 +269,7 @@ export class CheckoutHttpApi {
           ),
         })),
       );
+
       return json({
         ok: true,
         data: { listings: rows, simulationNotice: SIMULATION_NOTICE },
@@ -223,12 +280,18 @@ export class CheckoutHttpApi {
     return this.handle(async () => {
       const input = await this.body(request, createSchema);
       const listing = await this.services.catalog.getListing(input.listingId);
-      if (!listing) return apiFailure('NOT_FOUND', 'Listing not found');
-      if (listing.eventId !== input.eventId)
+
+      if (!listing) {
+        return apiFailure('NOT_FOUND', 'Listing not found');
+      }
+
+      if (listing.eventId !== input.eventId) {
         return apiFailure(
           'INVALID_SELECTION',
           'Listing belongs to another event',
         );
+      }
+
       return this.callerCookie(
         request,
         this.response(await this.services.checkout.create(input), 201),
@@ -253,6 +316,7 @@ export class CheckoutHttpApi {
               410,
             )
           : this.response(result);
+
       return this.callerCookie(request, response);
     });
   }
@@ -260,6 +324,7 @@ export class CheckoutHttpApi {
     return this.handle(async () => {
       identifierSchema.parse(id);
       const input = await this.body(request, versioned);
+
       return this.response(
         await this.services.checkout.acceptQuote({ sessionId: id, ...input }),
       );
@@ -271,23 +336,32 @@ export class CheckoutHttpApi {
       const input = await this.body(request, versioned);
       const key = this.key(request);
       const callerId = this.services.cookies.read(request);
-      if (!callerId)
+
+      if (!callerId) {
         return apiFailure(
           'CALLER_REQUIRED',
           "Read the checkout first to establish this device's caller cookie",
         );
+      }
+
       const result = await this.services.checkout.complete({
         sessionId: id,
         ...input,
         callerId,
         idempotencyKey: key,
       });
-      if (!result.ok) return this.response(result);
-      if (result.value.kind !== 'COMPLETED')
+
+      if (!result.ok) {
+        return this.response(result);
+      }
+
+      if (result.value.kind !== 'COMPLETED') {
         return this.response(
           result,
           result.value.kind === 'IN_PROGRESS' ? 202 : 200,
         );
+      }
+
       const { orderId, capability } = result.value;
       const response = json({
         ok: true,
@@ -297,6 +371,7 @@ export class CheckoutHttpApi {
           confirmationUrl: `/api/orders/${orderId}/confirmation`,
         },
       });
+
       response.headers.append(
         'Set-Cookie',
         this.services.cookies.serialize(
@@ -304,6 +379,7 @@ export class CheckoutHttpApi {
           capability,
         ),
       );
+
       return response;
     });
   }
@@ -311,6 +387,7 @@ export class CheckoutHttpApi {
     return this.handle(async () => {
       identifierSchema.parse(id);
       const input = await this.body(request, recoverSchema);
+
       return this.response(
         await this.services.checkout.recoverExpiredSession({
           sessionId: id,
@@ -327,11 +404,14 @@ export class CheckoutHttpApi {
       const capability = authorization?.startsWith('Bearer ')
         ? authorization.slice(7)
         : cookie(request, confirmationCookie(id));
-      if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability))
+
+      if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) {
         return apiFailure(
           'INVALID_COMPLETION_CAPABILITY',
           'Confirmation capability required',
         );
+      }
+
       return this.response(
         await this.services.checkout.confirm({
           orderId: id,

@@ -12,7 +12,9 @@ import {
   eventDate,
   eventTime,
 } from '@/lib/ui/presentation';
+
 export const dynamic = 'force-dynamic';
+
 export default async function EventPage({
   params,
 }: {
@@ -20,10 +22,16 @@ export default async function EventPage({
 }) {
   const { id } = await params;
   const event = await new FixtureCatalog().getEvent(id);
-  if (!event) notFound();
+
+  if (!event) {
+    notFound();
+  }
+
   let initial: ListingRow[] | null = null;
+
   try {
     const { catalog, store } = await checkoutRuntime();
+
     initial = await Promise.all(
       (await catalog.listListings(id)).map(async (listing) => ({
         listing,
@@ -31,6 +39,7 @@ export default async function EventPage({
       })),
     );
   } catch {}
+
   return (
     <>
       <Header />

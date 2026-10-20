@@ -8,5 +8,6 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
+
   return withCheckoutApi((api) => api.acknowledge(request, id));
 }

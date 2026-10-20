@@ -14,28 +14,35 @@ export function validateCatalog(
   const eventIds = new Set<string>();
   const listingIds = new Set<string>();
   const physicalUnits = new Set<string>();
+
   for (const event of eventData) {
-    if (!event.id || eventIds.has(event.id))
+    if (!event.id || eventIds.has(event.id)) {
       throw new Error('Duplicate or empty event ID');
+    }
+
     instant(event.startsAt);
     new Intl.DateTimeFormat('en-US', { timeZone: event.timeZone }).format(
       new Date(0),
     );
     eventIds.add(event.id);
   }
+
   for (const listing of listingData) {
     if (
       !listing.id ||
       listingIds.has(listing.id) ||
       !eventIds.has(listing.eventId)
-    )
+    ) {
       throw new Error('Invalid listing identity');
+    }
+
     listingIds.add(listing.id);
     validateAllocation(listing.allocation);
     cents(listing.unitPrice);
     cents(listing.feePerTicket);
     version(listing.version);
     const { min, max, increment } = listing.quantityRules;
+
     if (
       ![min, max, increment].every(
         (value) => Number.isSafeInteger(value) && value > 0,
@@ -43,8 +50,10 @@ export function validateCatalog(
       min > max ||
       max > allocationQuantity(listing.allocation) ||
       (max - min) % increment !== 0
-    )
+    ) {
       throw new Error('Invalid quantity rules');
+    }
+
     const allocation = listing.allocation;
     const units =
       allocation.kind === 'ASSIGNED'
@@ -57,9 +66,12 @@ export function validateCatalog(
             ]),
           )
         : [JSON.stringify([listing.eventId, allocation.section, 'GA'])];
+
     for (const unit of units) {
-      if (physicalUnits.has(unit))
+      if (physicalUnits.has(unit)) {
         throw new Error('Overlapping physical inventory in catalog');
+      }
+
       physicalUnits.add(unit);
     }
   }

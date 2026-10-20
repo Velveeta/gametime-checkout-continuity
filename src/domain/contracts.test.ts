@@ -18,15 +18,21 @@ function assertContracts(session: CheckoutSession) {
   if (session.status === 'COMPLETED') {
     // @ts-expect-error completed sessions cannot carry a processing deadline
     const deadline: Instant = session.processingDeadlineAt;
+
     void deadline;
   }
+
   if (session.status === 'PAYMENT_RETRYABLE') {
     // @ts-expect-error a third confirmed transient failure cannot be retryable
     const exhausted: 3 = session.paymentAttemptCount;
+
     void exhausted;
   }
+
   // @ts-expect-error a public session id is not a completion capability
   const capability: CompletionCapability = session.id;
+
   void capability;
 }
+
 void assertContracts;

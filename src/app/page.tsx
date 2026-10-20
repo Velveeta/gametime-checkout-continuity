@@ -8,14 +8,17 @@ import { checkoutRuntime } from '@/lib/checkout-runtime';
 import { eventDate, eventTime, eventTitle } from '@/lib/ui/presentation';
 
 export const dynamic = 'force-dynamic';
+
 export default async function Home() {
   // Discovery remains browsable before credentials are configured. A reservation
   // always requires live persistence; fixture fallback never fabricates stock.
   let catalog: Pick<FixtureCatalog, 'listEvents' | 'listListings'> =
     new FixtureCatalog();
+
   try {
     catalog = (await checkoutRuntime()).catalog;
   } catch {}
+
   const events = await Promise.all(
     (await catalog.listEvents()).map(async (event) => ({
       event,
@@ -29,6 +32,7 @@ export default async function Home() {
   const featured = events.find(
     ({ event }) => event.id === 'demo-midnight',
   )!.event;
+
   return (
     <>
       <Header />

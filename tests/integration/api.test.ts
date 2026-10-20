@@ -16,6 +16,7 @@ const selected =
     ? { ...listing.allocation, seats: [9, 10] }
     : listing.allocation;
 let runtime: Awaited<ReturnType<typeof composeCheckout>>;
+
 function request(
   path: string,
   body?: unknown,
@@ -38,12 +39,14 @@ function request(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
+
 function caller(response: Response) {
   return response.headers
     .getSetCookie()
     .find((c) => c.startsWith(CALLER_COOKIE + '='))!
     .split(';')[0]!;
 }
+
 async function create() {
   const response = await runtime.api.create(
     request('/api/checkouts', {
@@ -53,20 +56,24 @@ async function create() {
       expectedListingVersion: 1,
     }),
   );
+
   expect(response.status).toBe(201);
   const body = await response.json();
+
   return {
     id: body.data.session.id,
     snapshot: body.data,
     cookie: caller(response),
   };
 }
+
 function versions(s: Awaited<ReturnType<typeof create>>) {
   return {
     expectedVersion: s.snapshot.session.version,
     quoteVersion: s.snapshot.session.quote.version,
   };
 }
+
 beforeAll(() => redis.start());
 afterAll(() => redis.stop());
 beforeEach(async () => {
@@ -83,11 +90,13 @@ beforeEach(async () => {
 describe('HTTP transport with production services and actual Redis', () => {
   it('lists simulated events/listings with availability and rejects unknown IDs', async () => {
     const events = await runtime.api.events();
+
     expect(events.status).toBe(200);
     expect((await events.json()).data.events).toHaveLength(4);
     expect((await runtime.api.event('missing')).status).toBe(404);
     const response = await runtime.api.listings(listing.eventId);
     const body = await response.json();
+
     expect(body.data.listings).toHaveLength(4);
     expect(
       body.data.listings.map(
@@ -108,6 +117,7 @@ describe('HTTP transport with production services and actual Redis', () => {
       allocation: selected,
       expectedListingVersion: 1,
     };
+
     for (const input of [
       { ...base, callerId: 'spoof' },
       { ...base, expectedListingVersion: 0 },
@@ -119,8 +129,10 @@ describe('HTTP transport with production services and actual Redis', () => {
       const response = await runtime.api.create(
         request('/api/checkouts', input),
       );
+
       expect(response.status).toBe(400);
     }
+
     expect(
       (
         await runtime.api.create(
@@ -164,11 +176,13 @@ describe('HTTP transport with production services and actual Redis', () => {
         expectedListingVersion: 1,
       }),
     );
+
     expect(duplicate.status).toBe(409);
     expect((await duplicate.json()).error.code).toBe('INVENTORY_UNAVAILABLE');
     const key = runtime.store.sessionKey(a.id);
     const before = await redis.command('GET', key);
-    for (let i = 0; i < 3; i++)
+
+    for (let i = 0; i < 3; i++) {
       expect(
         (
           await runtime.api.read(
@@ -177,6 +191,8 @@ describe('HTTP transport with production services and actual Redis', () => {
           )
         ).status,
       ).toBe(200);
+    }
+
     expect(await redis.command('GET', key)).toBe(before);
   });
   it('validates the browser Host origin when Next uses an internal request URL', async () => {
@@ -198,6 +214,7 @@ describe('HTTP transport with production services and actual Redis', () => {
         body: JSON.stringify(body),
       }),
     );
+
     expect(response.status).toBe(201);
     const rejected = await runtime.api.create(
       new Request('http://localhost:3000/api/checkouts', {
@@ -210,11 +227,13 @@ describe('HTTP transport with production services and actual Redis', () => {
         body: JSON.stringify(body),
       }),
     );
+
     expect(rejected.status).toBe(403);
   });
   it('rejects cross-origin writes, missing keys, forged caller bindings and body-supplied callers', async () => {
     const a = await create();
     const path = `/api/checkouts/${a.id}/complete`;
+
     expect(
       (
         await runtime.api.complete(
@@ -244,6 +263,7 @@ describe('HTTP transport with production services and actual Redis', () => {
       ).status,
     ).toBe(401);
     const forged = a.cookie.slice(0, -1) + (a.cookie.endsWith('a') ? 'b' : 'a');
+
     expect(
       (
         await runtime.api.complete(
@@ -272,16 +292,20 @@ describe('HTTP transport with production services and actual Redis', () => {
       request(path, versions(a), { cookie: a.cookie, key: 'purchase' }),
       a.id,
     );
+
     expect(response.status).toBe(200);
     const body = await response.json();
+
     expect(body.data.kind).toBe('COMPLETED');
     expect(body.data.capability).toBeUndefined();
     const confirmation = response.headers.getSetCookie()[0]!;
+
     expect(confirmation).toContain('HttpOnly');
     expect(confirmation).toContain('Secure');
     expect(confirmation).toContain('SameSite=Lax');
     const bearer = confirmation.split(';')[0]!;
     const orderId = body.data.orderId;
+
     expect(
       (
         await runtime.api.confirmation(
@@ -290,27 +314,33 @@ describe('HTTP transport with production services and actual Redis', () => {
         )
       ).status,
     ).toBe(403);
+
     for (let i = 0; i < 2; i++) {
       const confirmed = await runtime.api.confirmation(
         request(body.data.confirmationUrl, undefined, { cookie: bearer }),
         orderId,
       );
+
       expect(confirmed.status).toBe(200);
       expect((await confirmed.json()).data.id).toBe(orderId);
     }
+
     for (let i = 0; i < 3; i++) {
       const replay = await runtime.api.complete(
         request(path, versions(a), { cookie: a.cookie, key: 'purchase' }),
         a.id,
       );
+
       expect(await replay.json()).toEqual(body);
       expect(replay.headers.getSetCookie()).toEqual(
         response.headers.getSetCookie(),
       );
     }
+
     const otherCookie = new CallerCookies('caller-secret-'.repeat(4), true)
       .create()
       .split(';')[0]!;
+
     expect(
       (
         await runtime.api.complete(
@@ -332,6 +362,7 @@ describe('HTTP transport with production services and actual Redis', () => {
       a.id,
     );
     const text = await read.text();
+
     expect(text).not.toContain(bearer.split('=')[1]!);
   });
   it('uses 410 for retained expired checkout; only explicit fresh navigation recovers', async () => {
@@ -345,18 +376,21 @@ describe('HTTP transport with production services and actual Redis', () => {
       analytics: { record: async () => {} },
     });
     const a = await create();
+
     await redis.after(a.snapshot.session.reservationExpiresAt);
     const before = await redis.command('GET', runtime.store.sessionKey(a.id));
     const expired = await runtime.api.read(
       request(`/api/checkouts/${a.id}`),
       a.id,
     );
+
     expect(expired.status).toBe(410);
     expect((await expired.json()).data.session.status).toBe('EXPIRED');
     expect(await redis.command('GET', runtime.store.sessionKey(a.id))).toBe(
       before,
     );
     const path = `/api/checkouts/${a.id}/recover`;
+
     expect(
       (
         await runtime.api.recover(
@@ -369,11 +403,13 @@ describe('HTTP transport with production services and actual Redis', () => {
       request(path, { intent: 'FRESH_NAVIGATION' }, { key: 'recovery' }),
       a.id,
     );
+
     expect(recovered.status).toBe(200);
     expect((await recovered.json()).data.kind).toBe('REDIRECT_CHECKOUT');
   });
   it('maps SSR navigation policy to current root/event/successor/render outcomes', async () => {
     const a = await create();
+
     expect(
       (
         await runtime.checkout.enter({
@@ -395,6 +431,7 @@ describe('HTTP transport with production services and actual Redis', () => {
       intent: 'FRESH_NAVIGATION',
       recoveryIdempotencyKey: 'ssr',
     });
+
     expect(completed.ok && completed.value.kind).toBe('REDIRECT_HOME');
   });
 });

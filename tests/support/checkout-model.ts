@@ -51,18 +51,20 @@ type Ledger = {
   final?: CheckoutMutation;
 };
 const success = <T>(value: T): Result<T> => ({ ok: true, value });
+
 function error(code: ConstructorParameters<typeof DomainError>[0]): never {
   throw new DomainError(code, code);
 }
+
 function units(a: SeatAllocation) {
   return a.kind === 'ASSIGNED'
     ? a.seats.map((seat) => `${a.section}/${a.row}/${seat}`)
     : [];
 }
 
-export class CheckoutModel
-  implements CheckoutRepository, OrderRepository, Inventory
-{
+type CheckoutModelContracts = CheckoutRepository & OrderRepository & Inventory;
+
+export class CheckoutModel implements CheckoutModelContracts {
   readonly sessions = new Map<string, CheckoutSession>();
   readonly holds = new Map<string, Hold>();
   readonly orders = new Map<string, Order>();
@@ -83,6 +85,7 @@ export class CheckoutModel
   async read(id: string) {
     const session = this.sessions.get(id);
     const serverNow = this.clock.now();
+
     return !session ||
       Date.parse(serverNow) >= Date.parse(session.recoveryRetainUntil)
       ? null
@@ -112,35 +115,46 @@ export class CheckoutModel
       [...this.holds].map(([id, hold]) => [id, structuredClone(hold)]),
     );
     const fenced = new Set(this.fences);
+
     for (const effect of decision.effects) {
       if (effect.kind === 'FENCE_ATTEMPT') {
         fenced.add(effect.attemptId);
         continue;
       }
+
       if (effect.kind === 'RESERVE') {
         const blocking = [...holds.values()].filter((hold) =>
           this.live(hold, now),
         );
+
         if (effect.allocation.kind === 'ASSIGNED') {
           const selected = units(effect.allocation);
+
           if (
             blocking.some((hold) =>
               units(hold.allocation).some((unit) => selected.includes(unit)),
             )
-          )
+          ) {
             error('INVENTORY_UNAVAILABLE');
+          }
         } else {
           const used = blocking.reduce(
             (sum, hold) => sum + allocationQuantity(hold.allocation),
             0,
           );
+
           if (
             used + effect.allocation.quantity >
             allocationQuantity(this.listing.allocation)
-          )
+          ) {
             error('INVENTORY_UNAVAILABLE');
+          }
         }
-        if (holds.has(effect.reservationId)) error('RESERVATION_CONFLICT');
+
+        if (holds.has(effect.reservationId)) {
+          error('RESERVATION_CONFLICT');
+        }
+
         holds.set(effect.reservationId, {
           id: effect.reservationId,
           owner: decision.session.id,
@@ -150,43 +164,74 @@ export class CheckoutModel
         });
       } else {
         const hold = holds.get(effect.reservationId);
-        if (!hold || hold.owner !== decision.session.id)
+
+        if (!hold || hold.owner !== decision.session.id) {
           error('RESERVATION_CONFLICT');
-        if (effect.kind === 'RELEASE') hold.status = 'RELEASED';
+        }
+
+        if (effect.kind === 'RELEASE') {
+          hold.status = 'RELEASED';
+        }
+
         if (
           effect.kind === 'PROTECT' ||
           effect.kind === 'RESTORE_BUSINESS_HOLD'
-        )
+        ) {
           hold.until = effect.until;
+        }
+
         if (effect.kind === 'SELL') {
-          if (hold.status !== 'HELD' || !this.live(hold, now))
+          if (hold.status !== 'HELD' || !this.live(hold, now)) {
             error('RESERVATION_EXPIRED');
+          }
+
           hold.status = 'SOLD';
         }
       }
     }
+
     if (
       decision.order &&
       (this.orders.has(decision.order.id) ||
         [...this.orders.values()].some(
           (order) => order.checkoutSessionId === decision.session.id,
         ))
-    )
+    ) {
       error('TERMINAL_SESSION');
+    }
+
     this.holds.clear();
-    for (const [id, hold] of holds) this.holds.set(id, hold);
+
+    for (const [id, hold] of holds) {
+      this.holds.set(id, hold);
+    }
+
     this.fences.clear();
-    for (const id of fenced) this.fences.add(id);
+
+    for (const id of fenced) {
+      this.fences.add(id);
+    }
+
     this.sessions.set(decision.session.id, structuredClone(decision.session));
-    if (decision.order)
+
+    if (decision.order) {
       this.orders.set(decision.order.id, structuredClone(decision.order));
+    }
   }
   private reconcile(id: string, now: Instant) {
     const session = this.sessions.get(id);
-    if (!session || Date.parse(now) >= Date.parse(session.recoveryRetainUntil))
+
+    if (
+      !session ||
+      Date.parse(now) >= Date.parse(session.recoveryRetainUntil)
+    ) {
       error('NOT_FOUND');
+    }
+
     const decision = reconcileCheckout(session, now);
+
     this.apply(decision, now);
+
     return decision;
   }
   private replay(
@@ -196,10 +241,14 @@ export class CheckoutModel
   ): CheckoutMutation {
     if (entry.final) {
       const cached = structuredClone(entry.final);
-      if (cached.kind === 'COMPLETED' || cached.kind === 'REPLAY_COMPLETED')
+
+      if (cached.kind === 'COMPLETED' || cached.kind === 'REPLAY_COMPLETED') {
         return { ...cached, kind: 'REPLAY_COMPLETED', events: [] };
+      }
+
       return { ...cached, kind: 'REPLAY', events: [] };
     }
+
     return {
       kind: 'IN_PROGRESS',
       session: structuredClone(session),
@@ -219,16 +268,22 @@ export class CheckoutModel
       command.quoteVersion,
     ]);
     const prior = this.ledger.get(key);
+
     if (prior) {
       if (
         prior.callerId !== command.callerId ||
         prior.fingerprint !== fingerprint
-      )
+      ) {
         error('IDEMPOTENCY_CONFLICT');
+      }
+
       return this.replay(prior, now, session);
     }
-    if (session.status === 'PROCESSING')
+
+    if (session.status === 'PROCESSING') {
       return { kind: 'IN_PROGRESS', session, serverNow: now, events: [] };
+    }
+
     const hold = this.holds.get(session.reservationId);
     const decision = claimCheckout(
       session,
@@ -250,14 +305,18 @@ export class CheckoutModel
       },
       policy,
     );
+
     this.apply(decision, now);
     this.ledger.set(key, {
       callerId: command.callerId,
       fingerprint,
       attemptId: command.attemptId,
     });
-    if (decision.session.status !== 'PROCESSING')
+
+    if (decision.session.status !== 'PROCESSING') {
       throw new Error('Invalid claim result');
+    }
+
     return {
       kind: 'CLAIMED',
       session: decision.session,
@@ -271,21 +330,38 @@ export class CheckoutModel
   ): Promise<Result<CheckoutMutation>> {
     this.commands.push(command);
     const now = this.clock.now();
+
     try {
       const targetId =
         command.kind === 'RECOVER'
           ? command.expiredSessionId
           : command.sessionId;
+
       for (const other of this.sessions.values()) {
-        if (other.id === targetId) continue;
+        if (other.id === targetId) {
+          continue;
+        }
+
         const due = reconcileCheckout(other, now);
-        if (due.effects.length) this.apply(due, now);
+
+        if (due.effects.length) {
+          this.apply(due, now);
+        }
       }
+
       if (command.kind === 'RESERVE') {
-        if (command.listingId !== this.listing.id) error('NOT_FOUND');
-        if (command.expectedListingVersion !== this.listing.version)
+        if (command.listingId !== this.listing.id) {
+          error('NOT_FOUND');
+        }
+
+        if (command.expectedListingVersion !== this.listing.version) {
           error('VERSION_CONFLICT');
-        if (this.sessions.has(command.sessionId)) error('RESERVATION_CONFLICT');
+        }
+
+        if (this.sessions.has(command.sessionId)) {
+          error('RESERVATION_CONFLICT');
+        }
+
         const decision = createCheckout(
           {
             id: command.sessionId,
@@ -296,39 +372,58 @@ export class CheckoutModel
           now,
           policy,
         );
+
         this.apply(decision, now);
+
         return success(this.mutation(decision, now));
       }
+
       const id =
         command.kind === 'RECOVER'
           ? command.expiredSessionId
           : command.sessionId;
       const reconciled = this.reconcile(id, now);
       const session = reconciled.session;
-      if (command.kind === 'CLAIM_COMPLETION')
+
+      if (command.kind === 'CLAIM_COMPLETION') {
         return success(this.claim(command, session, now, policy));
+      }
+
       if (command.kind === 'SETTLE_PAYMENT') {
         const entry = this.ledger.get(
           JSON.stringify([id, command.idempotencyKey]),
         );
+
         if (
           !entry ||
           entry.callerId !== command.callerId ||
           entry.attemptId !== command.attemptId
-        )
+        ) {
           error('IDEMPOTENCY_CONFLICT');
-        if (entry.final) return success(this.replay(entry, now, session));
+        }
+
+        if (entry.final) {
+          return success(this.replay(entry, now, session));
+        }
+
         if (this.fences.has(command.attemptId)) {
           const terminal = this.mutation(reconciled, now);
+
           entry.final = terminal;
+
           return success(terminal);
         }
+
         const decision = settleCheckout(session, command, now);
+
         this.apply(decision, now);
         let result: CheckoutMutation = this.mutation(decision, now);
+
         if (decision.order) {
-          if (decision.session.status !== 'COMPLETED')
+          if (decision.session.status !== 'COMPLETED') {
             throw new Error('Order requires completed session');
+          }
+
           this.digests.set(decision.order.id, command.capabilityDigest);
           result = {
             ...result,
@@ -337,13 +432,22 @@ export class CheckoutModel
             completion: { orderId: decision.order.id },
           };
         }
-        if (decision.session.status !== 'PROCESSING') entry.final = result;
+
+        if (decision.session.status !== 'PROCESSING') {
+          entry.final = result;
+        }
+
         return success(result);
       }
+
       if (command.kind === 'RECOVER') {
-        if (session.status !== 'EXPIRED') error('TERMINAL_SESSION');
+        if (session.status !== 'EXPIRED') {
+          error('TERMINAL_SESSION');
+        }
+
         if (session.successorSessionId) {
           const successor = this.sessions.get(session.successorSessionId)!;
+
           return success({
             kind: 'UPDATED',
             session: structuredClone(successor),
@@ -351,6 +455,7 @@ export class CheckoutModel
             events: [],
           });
         }
+
         const decision = recoverCheckout(
           session,
           {
@@ -362,16 +467,21 @@ export class CheckoutModel
           now,
           policy,
         );
+
         this.apply(decision, now);
         this.sessions.set(session.id, {
           ...session,
           successorSessionId: decision.session.id,
           version: version(session.version + 1),
         });
+
         return success(this.mutation(decision, now));
       }
-      if (command.kind === 'EXPIRE_IF_DUE')
+
+      if (command.kind === 'EXPIRE_IF_DUE') {
         return success(this.mutation(reconciled, now));
+      }
+
       const decision =
         command.kind === 'REFRESH_QUOTE'
           ? refreshCheckoutQuote(
@@ -400,10 +510,15 @@ export class CheckoutModel
                 now,
                 policy,
               );
+
       this.apply(decision, now);
+
       return success(this.mutation(decision, now));
     } catch (error) {
-      if (error instanceof DomainError) return { ok: false, error };
+      if (error instanceof DomainError) {
+        return { ok: false, error };
+      }
+
       throw error;
     }
   }
@@ -414,6 +529,7 @@ export class CheckoutModel
     const order = this.orders.get(orderId);
     const digest = createHash('sha256').update(capability).digest('hex');
     const stored = this.digests.get(orderId);
+
     return order &&
       stored &&
       timingSafeEqual(Buffer.from(digest), Buffer.from(stored))
@@ -428,12 +544,20 @@ export class CheckoutModel
   }
   async getAvailability(listingId: string) {
     const now = this.clock.now();
+
     // Test inventory reads model the FUTURE joint reconciliation requirement.
     for (const session of this.sessions.values()) {
       const decision = reconcileCheckout(session, now);
-      if (decision.effects.length) this.apply(decision, now);
+
+      if (decision.effects.length) {
+        this.apply(decision, now);
+      }
     }
-    if (listingId !== this.listing.id) error('NOT_FOUND');
+
+    if (listingId !== this.listing.id) {
+      error('NOT_FOUND');
+    }
+
     const live = [...this.holds.values()].filter((hold) =>
       this.live(hold, now),
     );
@@ -445,30 +569,38 @@ export class CheckoutModel
       .reduce((sum, hold) => sum + allocationQuantity(hold.allocation), 0);
     const capacity = allocationQuantity(this.listing.allocation);
     const available: SeatAllocation[] = [];
+
     if (this.listing.allocation.kind === 'GENERAL_ADMISSION') {
-      if (capacity > held + sold)
+      if (capacity > held + sold) {
         available.push({
           ...this.listing.allocation,
           quantity: capacity - held - sold,
         });
+      }
     } else {
       const blocked = new Set(live.flatMap((hold) => units(hold.allocation)));
       let run: number[] = [];
+
       for (const seat of this.listing.allocation.seats) {
         const key = units({ ...this.listing.allocation, seats: [seat] })[0]!;
+
         if (blocked.has(key)) {
           run = [];
           continue;
         }
+
         if (!run.length) {
           run = [seat];
           available.push({
             ...this.listing.allocation,
             seats: run as [number, ...number[]],
           });
-        } else run.push(seat);
+        } else {
+          run.push(seat);
+        }
       }
     }
+
     return {
       available,
       serverNow: now,

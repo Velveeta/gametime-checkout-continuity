@@ -19,6 +19,7 @@ export function Header() {
     </header>
   );
 }
+
 export function Footer() {
   return (
     <footer className="site-footer">
@@ -35,6 +36,7 @@ export function Footer() {
     </footer>
   );
 }
+
 export function Assurance() {
   return (
     <div className="assurance">

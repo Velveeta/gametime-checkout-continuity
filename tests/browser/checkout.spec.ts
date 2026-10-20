@@ -19,6 +19,7 @@ const allocation =
     ? { ...listing.allocation, seats: [9, 10] as [number, number] }
     : listing.allocation;
 const contexts: BrowserContext[] = [];
+
 test.beforeAll(async () => {
   test.setTimeout(120_000);
   env = await startHttpEnvironment([
@@ -38,8 +39,11 @@ test.beforeEach(async () => {
   await env.redis.command('FLUSHDB');
 });
 test.afterEach(async () => {
-  for (const context of contexts.splice(0)) await context.close();
+  for (const context of contexts.splice(0)) {
+    await context.close();
+  }
 });
+
 async function pageOn(browser: Browser, server = 0, mobile = false) {
   const context = await browser.newContext({
     viewport: mobile
@@ -47,9 +51,12 @@ async function pageOn(browser: Browser, server = 0, mobile = false) {
       : { width: 1440, height: 1000 },
     ...(mobile ? { isMobile: true, hasTouch: true } : {}),
   });
+
   contexts.push(context);
+
   return context.newPage().then((page) => ({ page, base: env.bases[server]! }));
 }
+
 async function reserve(page: Page, base: string) {
   await page.goto(base + `/events/${listing.eventId}`);
   const card = page.getByRole('article', {
@@ -61,17 +68,21 @@ async function reserve(page: Page, base: string) {
       new URL(response.url()).pathname === '/api/checkouts' &&
       response.request().method() === 'POST',
   );
+
   await card
     .getByRole('button', { name: 'Reserve tickets', exact: true })
     .click();
   const response = await reservation;
+
   expect(response.ok(), await response.text()).toBe(true);
   await expect(page).toHaveURL(/\/checkout\//);
   await expect(
     page.getByRole('button', { name: /Complete simulated purchase/ }),
   ).toBeEnabled();
+
   return page.url().split('/').at(-1)!;
 }
+
 async function shortCheckout(holdMs = 1800, processingMs = 1000) {
   const setup = await composeCheckout({
     redis: env.redis,
@@ -87,9 +98,14 @@ async function shortCheckout(holdMs = 1800, processingMs = 1000) {
     allocation,
     expectedListingVersion: version(1),
   });
-  if (!result.ok) throw result.error;
+
+  if (!result.ok) {
+    throw result.error;
+  }
+
   return result.value;
 }
+
 async function price(unit: number, fee: number) {
   await env.redis.command(
     'EVAL',
@@ -101,6 +117,7 @@ async function price(unit: number, fee: number) {
     String(fee),
   );
 }
+
 async function inventory() {
   return JSON.parse(
     await env.redis.command(
@@ -114,6 +131,7 @@ test('event discovery, filtering, seat selection and desktop checkout layout', a
   browser,
 }) => {
   const { page, base } = await pageOn(browser);
+
   await page.goto(base);
   await expect(
     page.getByRole('heading', { name: 'Be there. Feel everything.' }),
@@ -140,6 +158,7 @@ test('event discovery, filtering, seat selection and desktop checkout layout', a
   const actions = await page
     .getByRole('region', { name: 'Checkout actions' })
     .boundingBox();
+
   expect(summary!.x).toBeGreaterThan(actions!.x + actions!.width);
   expect(
     await page.evaluate(
@@ -156,9 +175,11 @@ test('server renders event, selected seats, total and reservation before JavaScr
 }) => {
   const s = await shortCheckout(15_000);
   const context = await browser.newContext({ javaScriptEnabled: false });
+
   contexts.push(context);
   const page = await context.newPage();
   const response = await page.goto(env.bases[0] + `/checkout/${s.session.id}`);
+
   expect(response!.status()).toBe(200);
   await expect(
     page.getByRole('heading', { name: /Dallas Cowboys/ }),
@@ -175,6 +196,7 @@ test('mobile uses the same session, stacks summary, offers a QR and copy link', 
   const a = await pageOn(browser);
   const id = await reserve(a.page, a.base);
   const b = await pageOn(browser, 1, true);
+
   await b.page.goto(b.base + `/checkout/${id}`);
   await expect(
     b.page.getByRole('button', { name: /Complete simulated/ }),
@@ -199,11 +221,13 @@ test('mobile uses the same session, stacks summary, offers a QR and copy link', 
   );
   const first = await a.page.request.get(a.base + `/api/checkouts/${id}`);
   const second = await b.page.request.get(b.base + `/api/checkouts/${id}`);
+
   expect((await first.json()).data.session.reservationExpiresAt).toBe(
     (await second.json()).data.session.reservationExpiresAt,
   );
   const payment = await b.page.locator('.payment-panel').boundingBox(),
     summary = await b.page.locator('.order-summary').boundingBox();
+
   expect(payment!.y).toBeGreaterThan(summary!.y + summary!.height);
   expect(
     await b.page.evaluate(
@@ -220,11 +244,13 @@ test('separate carts see stock removed and automatically restored on expiry', as
   browser,
 }) => {
   const a = await pageOn(browser);
+
   await a.page.goto(a.base + `/events/${listing.eventId}`);
   const card = a.page.getByRole('article', {
     name: listing.allocation.section,
     exact: true,
   });
+
   await expect(
     card.getByText('8 available · 0 reserved · 0 sold'),
   ).toBeVisible();
@@ -232,6 +258,7 @@ test('separate carts see stock removed and automatically restored on expiry', as
     .getByLabel('Seats together')
     .selectOption({ label: 'Row 18 · Seats 13, 14' });
   const s = await shortCheckout(3500);
+
   await expect(
     card.getByText('6 available · 2 reserved · 0 sold'),
   ).toBeVisible();
@@ -254,6 +281,7 @@ test('price acknowledgement synchronizes across contexts, decreases auto-apply',
   const a = await pageOn(browser);
   const id = await reserve(a.page, a.base);
   const b = await pageOn(browser, 1);
+
   await b.page.goto(b.base + `/checkout/${id}`);
   await price(10000, 2000);
   await expect(
@@ -277,13 +305,18 @@ test('countdown ignores device wall-clock skew and confirms mounted expiry witho
 }) => {
   const s = await shortCheckout(5500);
   const { page, base } = await pageOn(browser);
+
   await page.addInitScript(() => {
     const now = Date.now.bind(Date);
+
     Date.now = () => now() + 86_400_000;
   });
   let recoveryCalls = 0;
+
   page.on('request', (r) => {
-    if (r.url().includes('/recover')) recoveryCalls++;
+    if (r.url().includes('/recover')) {
+      recoveryCalls++;
+    }
   });
   await page.goto(base + `/checkout/${s.session.id}`);
   await expect(page.getByTestId('countdown')).toHaveText(/^0:0[0-6]$/);
@@ -295,6 +328,7 @@ test('countdown ignores device wall-clock skew and confirms mounted expiry witho
       `checkout:{${env.namespace}}:session:v2:${s.session.id}`,
     ),
   );
+
   expect(original.session.successorSessionId).toBeUndefined();
   await expect(
     page
@@ -306,8 +340,10 @@ test('fresh navigation recovers one new session while a completed URL returns ho
   browser,
 }) => {
   const s = await shortCheckout(100);
+
   await env.redis.after(s.session.reservationExpiresAt);
   const a = await pageOn(browser);
+
   await a.page.goto(a.base + `/checkout/${s.session.id}`);
   await expect(a.page).toHaveURL(/\/checkout\//);
   expect(a.page.url()).not.toContain(s.session.id);
@@ -315,6 +351,7 @@ test('fresh navigation recovers one new session while a completed URL returns ho
     a.page.getByRole('button', { name: /Complete simulated/ }),
   ).toBeEnabled();
   const recovered = a.page.url();
+
   await a.page.getByRole('button', { name: /Complete simulated/ }).click();
   await expect(a.page).toHaveURL(/\/orders\/.+\/confirmation$/);
   await a.page.goto(recovered);
@@ -326,13 +363,17 @@ test('only the completing context receives a refreshable confirmation; observer 
   const a = await pageOn(browser);
   const id = await reserve(a.page, a.base);
   const b = await pageOn(browser, 1);
+
   await b.page.goto(b.base + `/checkout/${id}`);
   await expect(
     b.page.getByRole('button', { name: /Complete simulated/ }),
   ).toBeEnabled();
   let submissions = 0;
+
   a.page.on('request', (r) => {
-    if (r.url().endsWith('/complete') && r.method() === 'POST') submissions++;
+    if (r.url().endsWith('/complete') && r.method() === 'POST') {
+      submissions++;
+    }
   });
   await a.page
     .getByRole('button', { name: /Complete simulated/ })
@@ -345,6 +386,7 @@ test('only the completing context receives a refreshable confirmation; observer 
     a.page.getByRole('heading', { name: "You're going." }),
   ).toBeVisible();
   const confirmationPath = new URL(a.page.url()).pathname;
+
   await a.page.reload();
   await expect(
     a.page.getByRole('heading', { name: "You're going." }),
@@ -359,6 +401,7 @@ test('transient noncapture allows a new attempt and then succeeds', async ({
   browser,
 }) => {
   const a = await pageOn(browser, 2);
+
   await reserve(a.page, a.base);
   await a.page.getByRole('button', { name: /Complete simulated/ }).click();
   await expect(
@@ -374,8 +417,11 @@ test('definitive decline releases tickets and stops periodic polling', async ({
   const a = await pageOn(browser, 3);
   const id = await reserve(a.page, a.base);
   let reads = 0;
+
   a.page.on('request', (r) => {
-    if (new URL(r.url()).pathname === `/api/checkouts/${id}`) reads++;
+    if (new URL(r.url()).pathname === `/api/checkouts/${id}`) {
+      reads++;
+    }
   });
   await a.page.getByRole('button', { name: /Complete simulated/ }).click();
   await expect(
@@ -386,6 +432,7 @@ test('definitive decline releases tickets and stops periodic polling', async ({
   ).toBeVisible();
   await a.page.waitForTimeout(500);
   const count = reads;
+
   await a.page.waitForTimeout(2300);
   expect(reads).toBe(count);
   expect(Object.keys((await inventory()).reservations)).toHaveLength(0);
@@ -394,14 +441,17 @@ test('three transient attempts exhaust without a fourth payment action', async (
   browser,
 }) => {
   const a = await pageOn(browser, 4);
+
   await reserve(a.page, a.base);
   await a.page.getByRole('button', { name: /Complete simulated/ }).click();
+
   for (let n = 1; n <= 2; n++) {
     await expect(
       a.page.getByText(new RegExp(`${n} of 3 attempts used`)),
     ).toBeVisible();
     await a.page.getByRole('button', { name: /Try payment again/ }).click();
   }
+
   await expect(
     a.page.getByText('Payment attempts exhausted', { exact: true }),
   ).toBeVisible();
@@ -414,6 +464,7 @@ test('processing protects inventory past the business deadline and resolves at i
 }) => {
   const s = await shortCheckout(2500);
   const a = await pageOn(browser, 5);
+
   await a.page.goto(a.base + `/checkout/${s.session.id}`);
   await a.page.getByRole('button', { name: /Complete simulated/ }).click();
   await expect(
@@ -422,8 +473,10 @@ test('processing protects inventory past the business deadline and resolves at i
   await expect(a.page.getByTestId('countdown')).toHaveCount(0);
   await env.redis.after(s.session.reservationExpiresAt);
   const stock = await inventory();
+
   expect(Object.keys(stock.reservations)).toHaveLength(1);
   const reservation = stock.reservations[s.session.reservationId];
+
   expect(reservation.processingDeadlineMs).toBeGreaterThan(
     Date.parse(s.session.reservationExpiresAt),
   );
@@ -449,16 +502,21 @@ test('lost successful response replays the same key and does not duplicate an or
   browser,
 }) => {
   const a = await pageOn(browser);
+
   await reserve(a.page, a.base);
   const keys: string[] = [];
   let drop = true;
+
   await a.page.route('**/api/checkouts/*/complete', async (route) => {
     keys.push(route.request().headers()['idempotency-key']!);
+
     if (drop) {
       drop = false;
       await route.fetch();
       await route.abort('failed');
-    } else await route.continue();
+    } else {
+      await route.continue();
+    }
   });
   await a.page.getByRole('button', { name: /Complete simulated/ }).click();
   await expect(a.page).toHaveURL(/\/orders\/.+\/confirmation$/);
@@ -470,6 +528,7 @@ test('focus revalidates changed state and keyboard controls remain accessible', 
   browser,
 }) => {
   const a = await pageOn(browser);
+
   await reserve(a.page, a.base);
   await a.page.evaluate(() =>
     Object.defineProperty(document, 'visibilityState', {
@@ -485,6 +544,7 @@ test('focus revalidates changed state and keyboard controls remain accessible', 
     (r) =>
       r.url().includes('/api/checkouts/') && r.request().method() === 'GET',
   );
+
   await a.page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
@@ -518,9 +578,11 @@ test('expired unavailable inventory and missing checkout URLs return to useful p
   browser,
 }) => {
   const original = await shortCheckout(100);
+
   await env.redis.after(original.session.reservationExpiresAt);
   await shortCheckout(15_000); // An independent cart now owns those same seats.
   const a = await pageOn(browser);
+
   await a.page.goto(a.base + `/checkout/${original.session.id}`);
   await expect(a.page).toHaveURL(a.base + `/events/${listing.eventId}`);
   await a.page.goto(a.base + '/checkout/no-such-checkout');
@@ -534,6 +596,7 @@ test('temporary refresh failure disables payment and recovers without replacing 
   const before = await inventory();
   const deadline =
     before.reservations[Object.keys(before.reservations)[0]!].expiresAtMs;
+
   await a.page.route(`**/api/checkouts/${id}`, (route) =>
     route.fulfill({
       status: 503,
@@ -557,6 +620,7 @@ test('temporary refresh failure disables payment and recovers without replacing 
     a.page.getByRole('button', { name: /Complete simulated/ }),
   ).toBeEnabled();
   const after = await inventory();
+
   expect(Object.keys(after.reservations)).toHaveLength(1);
   expect(
     after.reservations[Object.keys(after.reservations)[0]!].expiresAtMs,
@@ -567,8 +631,10 @@ test('keyboard skip navigation is discoverable and hidden during pointer interac
   browser,
 }) => {
   const a = await pageOn(browser);
+
   await a.page.goto(a.base);
   const skip = a.page.getByRole('link', { name: 'Skip to content' });
+
   await a.page.keyboard.press('Tab');
   await expect(skip).toBeFocused();
   await expect(skip).toBeInViewport();

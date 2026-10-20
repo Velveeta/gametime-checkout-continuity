@@ -24,6 +24,7 @@ const listing: Listing = {
   version: version(1),
   quantityRules: { min: 1, max: 4, increment: 1 },
 };
+
 describe('selection rules', () => {
   it('validates exact contiguous membership and quantities', () => {
     expect(() =>
@@ -64,6 +65,7 @@ describe('selection rules', () => {
       ...listing,
       quantityRules: { min: 2, max: 4, increment: 2 },
     };
+
     expect(() =>
       validateSelection(pairs, { kind: 'QUANTITY', quantity: 3 }),
     ).toThrow();
@@ -99,6 +101,7 @@ describe('selection rules', () => {
   });
   it('quotes explicit synthetic fees in safe integer cents', () => {
     const quote = quoteSelection(listing, 2);
+
     expect(quote).toMatchObject({
       ticketSubtotal: 19000,
       fees: 3800,

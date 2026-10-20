@@ -16,25 +16,35 @@ export function validateAllocation(allocation: SeatAllocation): void {
   const invalid = () => {
     throw new DomainError('INVALID_SELECTION', 'Invalid seat allocation');
   };
-  if (!allocation.section.trim()) invalid();
+
+  if (!allocation.section.trim()) {
+    invalid();
+  }
+
   if (allocation.kind === 'GENERAL_ADMISSION') {
-    if (!Number.isSafeInteger(allocation.quantity) || allocation.quantity < 1)
+    if (!Number.isSafeInteger(allocation.quantity) || allocation.quantity < 1) {
       invalid();
+    }
   } else {
-    if (!allocation.row.trim() || !allocation.seats.length) invalid();
+    if (!allocation.row.trim() || !allocation.seats.length) {
+      invalid();
+    }
+
     allocation.seats.forEach((seat, index) => {
       if (
         !Number.isSafeInteger(seat) ||
         seat < 1 ||
         (index > 0 && seat !== allocation.seats[index - 1]! + 1)
-      )
+      ) {
         invalid();
+      }
     });
   }
 }
 
 export function validateQuantity(listing: Listing, quantity: number): void {
   const { min, max, increment } = listing.quantityRules;
+
   if (
     !Number.isSafeInteger(quantity) ||
     quantity < min ||
@@ -52,18 +62,23 @@ export function validateSelection(
   listing: Listing,
   selection: InventorySelection,
 ): void {
-  if (selection.kind === 'QUANTITY')
+  if (selection.kind === 'QUANTITY') {
     return validateQuantity(listing, selection.quantity);
+  }
+
   const selected = selection.allocation;
   const pool = listing.allocation;
+
   validateAllocation(selected);
   validateQuantity(listing, allocationQuantity(selected));
+
   if (selected.kind !== pool.kind || selected.section !== pool.section) {
     throw new DomainError(
       'INVALID_SELECTION',
       'Selection does not belong to this listing',
     );
   }
+
   if (
     selected.kind === 'ASSIGNED' &&
     pool.kind === 'ASSIGNED' &&
@@ -75,6 +90,7 @@ export function validateSelection(
       'Selection does not belong to this listing',
     );
   }
+
   if (
     selected.kind === 'GENERAL_ADMISSION' &&
     pool.kind === 'GENERAL_ADMISSION' &&
@@ -91,6 +107,7 @@ export function quoteSelection(listing: Listing, quantity: number): PriceQuote {
   validateQuantity(listing, quantity);
   const ticketSubtotal = cents(listing.unitPrice * quantity);
   const fees = cents(listing.feePerTicket * quantity);
+
   return {
     ticketSubtotal,
     fees,

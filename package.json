@@ -17,7 +17,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:upstash": "vitest run --config vitest.upstash.config.ts",
     "test:http": "vitest run --config vitest.http.config.ts",
-    "format": "prettier --write .",
+    "format": "eslint . --fix --max-warnings=0 && prettier --write .",
     "format:check": "prettier --check .",
     "test:browser": "playwright test"
   },
@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",

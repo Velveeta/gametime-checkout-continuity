@@ -27,6 +27,7 @@ function Button({
 }: React.ComponentProps<'button'> &
   VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
   const Component = asChild ? Slot : 'button';
+
   return (
     <Component
       data-slot="button"

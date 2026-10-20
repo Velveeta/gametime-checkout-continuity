@@ -11,29 +11,48 @@ import { confirmationCookie } from '@/infrastructure/http/cookies';
 import { identifierSchema } from '@/infrastructure/redis/checkout-data';
 import { checkoutRuntime } from '@/lib/checkout-runtime';
 import type { CompletionCapability } from '@/domain/models';
+
 export const dynamic = 'force-dynamic';
+
 export default async function ConfirmationPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  if (!identifierSchema.safeParse(id).success) redirect('/');
+
+  if (!identifierSchema.safeParse(id).success) {
+    redirect('/');
+  }
+
   const capability = (await cookies()).get(confirmationCookie(id))?.value;
-  if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) redirect('/');
+
+  if (!capability || !/^[A-Za-z0-9_-]{43}$/.test(capability)) {
+    redirect('/');
+  }
+
   const { checkout, catalog } = await checkoutRuntime();
   const result = await checkout.confirm({
     orderId: id,
     capability: capability as CompletionCapability,
   });
-  if (!result.ok) redirect('/');
+
+  if (!result.ok) {
+    redirect('/');
+  }
+
   const order = result.value;
   const event = await catalog.getEvent(order.eventId);
-  if (!event) redirect('/');
+
+  if (!event) {
+    redirect('/');
+  }
+
   const quantity =
     order.allocation.kind === 'ASSIGNED'
       ? order.allocation.seats.length
       : order.allocation.quantity;
+
   return (
     <>
       <Header />

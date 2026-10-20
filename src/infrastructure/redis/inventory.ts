@@ -42,6 +42,7 @@ interface StoredAvailability {
   serverNowMs: number;
 }
 type Reply<T> = { ok: true; value: T } | { ok: false; code: DomainErrorCode };
+
 function reservation(raw: StoredReservation): InventoryReservation {
   const base = {
     id: raw.id,
@@ -51,15 +52,22 @@ function reservation(raw: StoredReservation): InventoryReservation {
     createdAt: instant(new Date(raw.createdAtMs).toISOString()),
     expiresAt: instant(new Date(raw.expiresAtMs).toISOString()),
   };
+
   if (raw.status === 'SOLD') {
-    if (!raw.orderId) throw new Error('Corrupt sold reservation');
+    if (!raw.orderId) {
+      throw new Error('Corrupt sold reservation');
+    }
+
     return { ...base, status: 'SOLD', orderId: raw.orderId };
   }
+
   return { ...base, status: raw.status };
 }
+
 function identifier(value: string): void {
-  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(value))
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(value)) {
     throw new DomainError('INVALID_SELECTION', 'Invalid inventory identifier');
+  }
 }
 
 export class RedisInventory implements ReservationRepository {
@@ -73,6 +81,7 @@ export class RedisInventory implements ReservationRepository {
     identifier(options.namespace);
     this.prefix = `checkout:{${options.namespace}}:inventory:`;
     this.holdDurationMs = options.holdDurationMs ?? 10 * 60_000;
+
     if (
       !Number.isSafeInteger(this.holdDurationMs) ||
       this.holdDurationMs < 100 ||
@@ -93,6 +102,7 @@ export class RedisInventory implements ReservationRepository {
       [this.prefix + eventId],
       [JSON.stringify({ ...request, eventId })],
     );
+
     return typeof raw === 'string' ? (JSON.parse(raw) as Reply<T>) : raw;
   }
   async initialize(): Promise<void> {
@@ -100,7 +110,9 @@ export class RedisInventory implements ReservationRepository {
     const groups = await Promise.all(
       events.map((event) => this.catalog.listListings(event.id)),
     );
+
     validateCatalog(events, groups.flat());
+
     for (const [index, event] of events.entries()) {
       const listings = Object.fromEntries(
         groups[index]!.map((listing) => [listing.id, listing]),
@@ -109,13 +121,20 @@ export class RedisInventory implements ReservationRepository {
         kind: 'INITIALIZE',
         listings,
       });
-      if (!result.ok) throw new DomainError(result.code, result.code);
+
+      if (!result.ok) {
+        throw new DomainError(result.code, result.code);
+      }
     }
   }
   private async listing(id: string): Promise<Listing> {
     identifier(id);
     const listing = await this.catalog.getListing(id);
-    if (!listing) throw new DomainError('NOT_FOUND', 'Listing not found');
+
+    if (!listing) {
+      throw new DomainError('NOT_FOUND', 'Listing not found');
+    }
+
     return listing;
   }
   async getAvailability(
@@ -123,14 +142,23 @@ export class RedisInventory implements ReservationRepository {
     ownerSessionId?: string,
   ): Promise<ListingAvailability> {
     const listing = await this.listing(listingId);
-    if (ownerSessionId !== undefined) identifier(ownerSessionId);
+
+    if (ownerSessionId !== undefined) {
+      identifier(ownerSessionId);
+    }
+
     const result = await this.command<StoredAvailability>(listing.eventId, {
       kind: 'AVAILABILITY',
       listingId,
       ownerSessionId,
     });
-    if (!result.ok) throw new DomainError(result.code, result.code);
+
+    if (!result.ok) {
+      throw new DomainError(result.code, result.code);
+    }
+
     const value = result.value;
+
     return {
       available: Array.isArray(value.available) ? value.available : [],
       ownReservations: Array.isArray(value.ownReservations)
@@ -148,17 +176,22 @@ export class RedisInventory implements ReservationRepository {
       identifier(input.sessionId);
       identifier(input.reservationId);
       const listing = await this.listing(input.listingId);
+
       validateSelection(listing, input.selection);
       const result = await this.command<StoredReservation>(listing.eventId, {
         kind: 'RESERVE',
         input,
         holdDurationMs: this.holdDurationMs,
       });
+
       return result.ok
         ? { ok: true, value: reservation(result.value) }
         : { ok: false, error: new DomainError(result.code, result.code) };
     } catch (error) {
-      if (error instanceof DomainError) return { ok: false, error };
+      if (error instanceof DomainError) {
+        return { ok: false, error };
+      }
+
       throw error;
     }
   }
@@ -177,11 +210,15 @@ export class RedisInventory implements ReservationRepository {
         kind: 'SELL',
         input,
       });
+
       return result.ok
         ? { ok: true, value: reservation(result.value) }
         : { ok: false, error: new DomainError(result.code, result.code) };
     } catch (error) {
-      if (error instanceof DomainError) return { ok: false, error };
+      if (error instanceof DomainError) {
+        return { ok: false, error };
+      }
+
       throw error;
     }
   }

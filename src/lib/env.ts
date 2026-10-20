@@ -59,6 +59,7 @@ const schema = z
         message: 'Provide both Redis REST credentials or neither',
       });
     }
+
     if (value.PAYMENT_SCENARIO !== 'SUCCESS' && !value.DEMO_MODE) {
       context.addIssue({
         code: 'custom',
@@ -66,6 +67,7 @@ const schema = z
         message: 'Non-default simulation scenarios require DEMO_MODE',
       });
     }
+
     if (value.DEMO_MODE && !value.DEMO_SECRET) {
       context.addIssue({
         code: 'custom',
@@ -78,21 +80,25 @@ const schema = z
 /** Invoke only from server adapters. Never serialize returned secrets to clients. */
 export function parseServerEnv(input: Record<string, string | undefined>) {
   const parsed = schema.safeParse(input);
+
   if (!parsed.success) {
     // Do not include input values (tokens/secrets) in logs or error messages.
     throw new Error(
       `Invalid server environment: ${parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')}`,
     );
   }
+
   return parsed.data;
 }
 
 /** Future infrastructure calls this at runtime; scaffold builds need no Redis. */
 export function requireRedisEnv(input: Record<string, string | undefined>) {
   const env = parseServerEnv(input);
+
   if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) {
     throw new Error('Redis REST credentials are required for this operation');
   }
+
   return {
     url: env.UPSTASH_REDIS_REST_URL,
     token: env.UPSTASH_REDIS_REST_TOKEN,
@@ -103,10 +109,15 @@ export function requireRedisEnv(input: Record<string, string | undefined>) {
 export function requireCheckoutEnv(input: Record<string, string | undefined>) {
   const env = parseServerEnv(input);
   const redis = requireRedisEnv(input);
-  if (!env.CHECKOUT_CALLER_SECRET || !env.CHECKOUT_COMPLETION_SECRET)
+
+  if (!env.CHECKOUT_CALLER_SECRET || !env.CHECKOUT_COMPLETION_SECRET) {
     throw new Error('Checkout caller and completion secrets are required');
-  if (env.CHECKOUT_CALLER_SECRET === env.CHECKOUT_COMPLETION_SECRET)
+  }
+
+  if (env.CHECKOUT_CALLER_SECRET === env.CHECKOUT_COMPLETION_SECRET) {
     throw new Error('Checkout secrets must be distinct');
+  }
+
   return {
     ...env,
     ...redis,

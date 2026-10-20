@@ -56,9 +56,11 @@ const quote = (
   total: cents(subtotal + fees),
   version: version(session.quote.version + 1),
 });
+
 function code(action: () => unknown, expected: string) {
   try {
     action();
+
     throw new Error('Expected rejection');
   } catch (error) {
     expect(error).toBeInstanceOf(DomainError);
@@ -69,6 +71,7 @@ function code(action: () => unknown, expected: string) {
 describe('checkout state/deadline rules', () => {
   it('starts a 10-minute hold at reservation, retaining metadata 30 minutes after expiry', () => {
     const session = fresh();
+
     expect(session.reservationExpiresAt).toBe(after(NOW, 600_000));
     expect(session.recoveryRetainUntil).toBe(after(NOW, 2_400_000));
     expect(session.quote.total).toBe(22800);
@@ -89,6 +92,7 @@ describe('checkout state/deadline rules', () => {
   });
   it('expires exactly at the business deadline, not one millisecond before', () => {
     const session = fresh();
+
     expect(reconcileCheckout(session, after(NOW, 599_999)).session.status).toBe(
       'ACTIVE',
     );
@@ -104,16 +108,22 @@ describe('checkout state/deadline rules', () => {
   it('protects processing beyond business expiry and fences exactly at processing timeout', () => {
     const session = fresh();
     const processing = claim(session, after(NOW, 599_999));
+
     expect(processing.reservationExpiresAt).toBe(session.reservationExpiresAt);
     expect(
       reconcileCheckout(processing, session.reservationExpiresAt).session
         .status,
     ).toBe('PROCESSING');
-    if (processing.status !== 'PROCESSING') throw new Error();
+
+    if (processing.status !== 'PROCESSING') {
+      throw new Error();
+    }
+
     const timeout = reconcileCheckout(
       processing,
       processing.processingDeadlineAt,
     );
+
     expect(timeout.session).toMatchObject({
       status: 'PAYMENT_FAILED',
       failureCode: 'PROCESSING_TIMEOUT',
@@ -131,20 +141,26 @@ describe('checkout state/deadline rules', () => {
       },
       processing.processingDeadlineAt,
     );
+
     expect(late.order).toBeUndefined();
   });
   it.each(['COMPLETED', 'PAYMENT_FAILED', 'EXPIRED'] as const)(
     'never reopens terminal %s',
     (status) => {
       let terminal: CheckoutSession;
-      if (status === 'EXPIRED')
+
+      if (status === 'EXPIRED') {
         terminal = reconcileCheckout(
           fresh(),
           fresh().reservationExpiresAt,
         ).session;
-      else {
+      } else {
         const processing = claim(fresh());
-        if (processing.status !== 'PROCESSING') throw new Error();
+
+        if (processing.status !== 'PROCESSING') {
+          throw new Error();
+        }
+
         terminal = settleCheckout(
           processing,
           {
@@ -158,6 +174,7 @@ describe('checkout state/deadline rules', () => {
           NOW,
         ).session;
       }
+
       expect(reconcileCheckout(terminal, after(NOW, 900_000)).session).toEqual(
         terminal,
       );
@@ -174,6 +191,7 @@ describe('checkout state/deadline rules', () => {
       quoteVersion: session.quote.version,
       attemptId: 'attempt',
     };
+
     code(
       () =>
         claimCheckout(
@@ -226,6 +244,7 @@ describe('total-price authorization', () => {
       session.version,
       NOW,
     );
+
     expect(changed.session.status).toBe('PRICE_REVIEW');
     expect(changed.session.acceptedTotal).toBe(22800);
     expect(changed.session.acknowledgedQuoteVersion).toBeUndefined();
@@ -250,6 +269,7 @@ describe('total-price authorization', () => {
       },
       facts(changed.session),
     );
+
     expect(claim(accepted.session).status).toBe('PROCESSING');
     expect(accepted.session.reservationExpiresAt).toBe(
       session.reservationExpiresAt,
@@ -263,6 +283,7 @@ describe('total-price authorization', () => {
       session.version,
       NOW,
     );
+
     expect(changed.events).toContain('price_decreased');
     expect(changed.session).toMatchObject({
       status: 'ACTIVE',
@@ -285,6 +306,7 @@ describe('total-price authorization', () => {
       higher.version,
       NOW,
     );
+
     expect(lower.events).toContain('price_decreased');
     expect(lower.session).toMatchObject({
       status: 'PRICE_REVIEW',
@@ -300,6 +322,7 @@ describe('total-price authorization', () => {
       session.version,
       NOW,
     ).session;
+
     expect(equal).toMatchObject({
       status: 'ACTIVE',
       acknowledgedQuoteVersion: 2,
@@ -310,6 +333,7 @@ describe('total-price authorization', () => {
       equal.version,
       NOW,
     ).session;
+
     expect(
       refreshCheckoutQuote(
         review,
@@ -330,6 +354,7 @@ describe('total-price authorization', () => {
   });
   it('rejects malformed quote arithmetic, nonmonotonic versions and processing repricing', () => {
     const session = fresh();
+
     code(
       () => validateQuote({ ...session.quote, total: cents(1) }),
       'INVALID_QUOTE',
@@ -345,6 +370,7 @@ describe('total-price authorization', () => {
       'VERSION_CONFLICT',
     );
     const processing = claim(session);
+
     code(
       () =>
         refreshCheckoutQuote(
@@ -361,9 +387,14 @@ describe('total-price authorization', () => {
 describe('payment resolution', () => {
   it('allows only three total confirmed transient attempts', () => {
     let session = fresh();
+
     for (let attempt = 1; attempt <= 3; attempt++) {
       session = claim(session);
-      if (session.status !== 'PROCESSING') throw new Error();
+
+      if (session.status !== 'PROCESSING') {
+        throw new Error();
+      }
+
       const outcome = settleCheckout(
         session,
         {
@@ -373,6 +404,7 @@ describe('payment resolution', () => {
         },
         NOW,
       );
+
       session = outcome.session;
       expect(session.status).toBe(
         attempt === 3 ? 'PAYMENT_FAILED' : 'PAYMENT_RETRYABLE',
@@ -380,12 +412,18 @@ describe('payment resolution', () => {
       expect(session.paymentAttemptCount).toBe(attempt);
       expect(session).not.toHaveProperty('processingDeadlineAt');
     }
+
     expect(session).toMatchObject({ failureCode: 'ATTEMPTS_EXHAUSTED' });
   });
   it('never retries unknown results; decline is terminal', () => {
     const processing = claim(fresh());
-    if (processing.status !== 'PROCESSING') throw new Error();
+
+    if (processing.status !== 'PROCESSING') {
+      throw new Error();
+    }
+
     const input = { attemptId: processing.attemptId, orderId: 'unused' };
+
     expect(
       settleCheckout(
         processing,
@@ -417,7 +455,11 @@ describe('payment resolution', () => {
   it('restores only the original business hold after transient non-capture', () => {
     const session = fresh();
     const processing = claim(session, after(NOW, 599_999));
-    if (processing.status !== 'PROCESSING') throw new Error();
+
+    if (processing.status !== 'PROCESSING') {
+      throw new Error();
+    }
+
     const settled = settleCheckout(
       processing,
       {
@@ -427,9 +469,14 @@ describe('payment resolution', () => {
       },
       session.reservationExpiresAt,
     );
+
     expect(settled.session.status).toBe('EXPIRED');
     const earlier = claim(session);
-    if (earlier.status !== 'PROCESSING') throw new Error();
+
+    if (earlier.status !== 'PROCESSING') {
+      throw new Error();
+    }
+
     const retry = settleCheckout(
       earlier,
       {
@@ -450,6 +497,7 @@ describe('payment resolution', () => {
       { expectedVersion: review.version, quoteVersion: review.quote.version },
       facts(review),
     ).session;
+
     expect(accepted).toMatchObject({
       status: 'PAYMENT_RETRYABLE',
       paymentAttemptCount: 1,
@@ -463,6 +511,7 @@ describe('payment resolution', () => {
       expiresAt: after(NOW, 900_000),
       authorized: true,
     };
+
     code(
       () =>
         changeCheckoutDeadline(
@@ -481,6 +530,7 @@ describe('payment resolution', () => {
       session,
       session.reservationExpiresAt,
     ).session;
+
     code(
       () =>
         changeCheckoutDeadline(
@@ -514,6 +564,7 @@ describe('payment resolution', () => {
       expired.reservationExpiresAt,
       policy,
     ).session;
+
     expect(recovered).toMatchObject({
       status: 'ACTIVE',
       paymentAttemptCount: 0,

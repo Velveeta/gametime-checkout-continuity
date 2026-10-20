@@ -9,6 +9,7 @@ import { requireCheckoutEnv } from './env';
 export async function checkoutRuntime() {
   const env = requireCheckoutEnv(process.env);
   const redis = upstashRedis({ url: env.url, token: env.token });
+
   return composeCheckout({
     redis,
     namespace: env.CHECKOUT_NAMESPACE,
@@ -18,6 +19,7 @@ export async function checkoutRuntime() {
     payment: new SimulatedPayment(env.PAYMENT_SCENARIO),
   });
 }
+
 export async function withCheckoutApi(
   action: (api: CheckoutHttpApi) => Promise<Response>,
 ) {

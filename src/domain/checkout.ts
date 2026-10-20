@@ -24,19 +24,24 @@ export const DEFAULT_CHECKOUT_POLICY: CheckoutPolicy = Object.freeze({
   retentionAfterExpiryMs: 30 * 60_000,
   processingMs: 60_000,
 });
+
 export function validateCheckoutPolicy(policy: CheckoutPolicy): CheckoutPolicy {
   if (
     ![policy.holdMs, policy.retentionAfterExpiryMs, policy.processingMs].every(
       (n) => Number.isSafeInteger(n) && n > 0,
     ) ||
     policy.processingMs > policy.retentionAfterExpiryMs
-  )
+  ) {
     throw new RangeError('Invalid checkout deadlines/retention policy');
+  }
+
   return Object.freeze({ ...policy });
 }
+
 export function after(now: Instant, milliseconds: number): Instant {
   return instant(new Date(Date.parse(now) + milliseconds).toISOString());
 }
+
 export type CheckoutEventName =
   | 'checkout_created'
   | 'quote_changed'
@@ -105,42 +110,57 @@ function base(session: CheckoutSession): SessionBase {
     createdAt: session.createdAt,
   };
 }
+
 function unchanged(session: CheckoutSession): CheckoutDecision {
   return { session, effects: [], events: [] };
 }
+
 function fail(
   code: ConstructorParameters<typeof DomainError>[0],
   message: string,
 ): never {
   throw new DomainError(code, message);
 }
+
 function cas(session: CheckoutSession, expected: Version) {
-  if (session.version !== expected)
+  if (session.version !== expected) {
     fail('VERSION_CONFLICT', 'Checkout changed; refresh before retrying');
+  }
 }
+
 function editable(session: CheckoutSession, now: Instant) {
-  if (session.status === 'PROCESSING')
+  if (session.status === 'PROCESSING') {
     fail('PROCESSING_IN_PROGRESS', 'Payment is already processing');
-  if (session.status === 'COMPLETED' || session.status === 'PAYMENT_FAILED')
+  }
+
+  if (session.status === 'COMPLETED' || session.status === 'PAYMENT_FAILED') {
     fail('TERMINAL_SESSION', 'Checkout is terminal');
+  }
+
   if (
     session.status === 'EXPIRED' ||
     Date.parse(now) >= Date.parse(session.reservationExpiresAt)
-  )
+  ) {
     fail('RESERVATION_EXPIRED', 'Reservation expired');
+  }
+
   return session;
 }
+
 export function validateQuote(quote: PriceQuote): void {
   cents(quote.ticketSubtotal);
   cents(quote.fees);
   cents(quote.total);
   version(quote.version);
+
   if (
     quote.currency !== 'USD' ||
     quote.total !== cents(quote.ticketSubtotal + quote.fees)
-  )
+  ) {
     fail('INVALID_QUOTE', 'Invalid quote total or currency');
+  }
 }
+
 export function sameQuote(a: PriceQuote, b: PriceQuote): boolean {
   return (
     a.version === b.version &&
@@ -150,6 +170,7 @@ export function sameQuote(a: PriceQuote, b: PriceQuote): boolean {
     a.currency === b.currency
   );
 }
+
 export function createCheckout(
   input: {
     id: string;
@@ -186,6 +207,7 @@ export function createCheckout(
     reservationExpiresAt: expires,
     recoveryRetainUntil: after(expires, policy.retentionAfterExpiryMs),
   };
+
   return {
     session,
     effects: [
@@ -211,11 +233,15 @@ export function reconcileCheckout(
     session.status === 'COMPLETED' ||
     session.status === 'EXPIRED' ||
     session.status === 'PAYMENT_FAILED'
-  )
+  ) {
     return unchanged(session);
+  }
+
   if (session.status === 'PROCESSING') {
-    if (Date.parse(now) < Date.parse(session.processingDeadlineAt))
+    if (Date.parse(now) < Date.parse(session.processingDeadlineAt)) {
       return unchanged(session);
+    }
+
     return {
       session: {
         ...base(session),
@@ -230,8 +256,11 @@ export function reconcileCheckout(
       events: ['payment_failed'],
     };
   }
-  if (Date.parse(now) < Date.parse(session.reservationExpiresAt))
+
+  if (Date.parse(now) < Date.parse(session.reservationExpiresAt)) {
     return unchanged(session);
+  }
+
   return {
     session: { ...base(session), status: 'EXPIRED' },
     effects: [{ kind: 'RELEASE', reservationId: session.reservationId }],
@@ -244,14 +273,18 @@ function idle(
   data: SessionBase,
   review: boolean,
 ): CheckoutSession {
-  if (session.paymentAttemptCount === 3)
+  if (session.paymentAttemptCount === 3) {
     fail('ATTEMPTS_EXHAUSTED', 'No payment attempts remain');
-  if (review)
+  }
+
+  if (review) {
     return {
       ...data,
       status: 'PRICE_REVIEW',
       paymentAttemptCount: session.paymentAttemptCount,
     };
+  }
+
   return session.paymentAttemptCount === 0
     ? { ...data, status: 'ACTIVE', paymentAttemptCount: 0 }
     : {
@@ -261,6 +294,7 @@ function idle(
         failureCode: 'TRANSIENT',
       };
 }
+
 export function refreshCheckoutQuote(
   session: CheckoutSession,
   quote: PriceQuote,
@@ -270,9 +304,15 @@ export function refreshCheckoutQuote(
   editable(session, now);
   cas(session, expected);
   validateQuote(quote);
-  if (sameQuote(session.quote, quote)) return unchanged(session);
-  if (quote.version <= session.quote.version)
+
+  if (sameQuote(session.quote, quote)) {
+    return unchanged(session);
+  }
+
+  if (quote.version <= session.quote.version) {
     fail('VERSION_CONFLICT', 'Quote version must advance for any change');
+  }
+
   const increased = quote.total > session.quote.total;
   const decreased = quote.total < session.quote.total;
   const review =
@@ -280,7 +320,9 @@ export function refreshCheckoutQuote(
     quote.total > session.acceptedTotal ||
     (!decreased && session.status === 'PRICE_REVIEW');
   const { acknowledgedQuoteVersion: _obsolete, ...data } = base(session);
+
   void _obsolete;
+
   return {
     session: idle(
       session,
@@ -298,6 +340,7 @@ export function refreshCheckoutQuote(
       : ['quote_changed'],
   };
 }
+
 export function acceptCheckoutQuote(
   session: CheckoutSession,
   input: { expectedVersion: Version; quoteVersion: Version },
@@ -305,11 +348,19 @@ export function acceptCheckoutQuote(
 ): CheckoutDecision {
   editable(session, facts.now);
   cas(session, input.expectedVersion);
-  if (!sameQuote(session.quote, facts.currentQuote))
+
+  if (!sameQuote(session.quote, facts.currentQuote)) {
     fail('VERSION_CONFLICT', 'Live quote changed; refresh before acceptance');
-  if (input.quoteVersion !== session.quote.version)
+  }
+
+  if (input.quoteVersion !== session.quote.version) {
     fail('QUOTE_ACCEPTANCE_REQUIRED', 'Accept the exact current quote');
-  if (session.status !== 'PRICE_REVIEW') return unchanged(session);
+  }
+
+  if (session.status !== 'PRICE_REVIEW') {
+    return unchanged(session);
+  }
+
   return {
     session: idle(
       session,
@@ -324,6 +375,7 @@ export function acceptCheckoutQuote(
     events: ['quote_accepted'],
   };
 }
+
 export function claimCheckout(
   session: CheckoutSession,
   input: { expectedVersion: Version; quoteVersion: Version; attemptId: string },
@@ -339,22 +391,34 @@ export function claimCheckout(
   editable(session, facts.now);
   cas(session, input.expectedVersion);
   validateQuote(facts.currentQuote);
-  if (!facts.ownsReservation)
+
+  if (!facts.ownsReservation) {
     fail('RESERVATION_CONFLICT', 'No current owned reservation');
-  if (facts.orderExists)
+  }
+
+  if (facts.orderExists) {
     fail('TERMINAL_SESSION', 'An order already exists for this checkout');
-  if (!sameQuote(session.quote, facts.currentQuote))
+  }
+
+  if (!sameQuote(session.quote, facts.currentQuote)) {
     fail('VERSION_CONFLICT', 'Live quote changed; refresh and review');
+  }
+
   if (
     session.status === 'PRICE_REVIEW' ||
     session.acknowledgedQuoteVersion !== input.quoteVersion ||
     input.quoteVersion !== session.quote.version ||
     session.quote.total > session.acceptedTotal
-  )
+  ) {
     fail('QUOTE_ACCEPTANCE_REQUIRED', 'Accept the exact current quote');
-  if (session.paymentAttemptCount >= 3)
+  }
+
+  if (session.paymentAttemptCount >= 3) {
     fail('ATTEMPTS_EXHAUSTED', 'No payment attempts remain');
+  }
+
   const deadline = after(facts.now, policy.processingMs);
+
   return {
     session: {
       ...base(session),
@@ -374,18 +438,30 @@ export function claimCheckout(
     events: ['payment_claimed'],
   };
 }
+
 export function settleCheckout(
   session: CheckoutSession,
   input: { attemptId: string; outcome: ResolvedPayment; orderId: string },
   now: Instant,
 ): CheckoutDecision {
-  if (session.status !== 'PROCESSING')
+  if (session.status !== 'PROCESSING') {
     fail('TERMINAL_SESSION', 'No processing attempt to settle');
-  if (session.attemptId !== input.attemptId)
+  }
+
+  if (session.attemptId !== input.attemptId) {
     fail('VERSION_CONFLICT', 'Stale payment attempt');
+  }
+
   const reconciled = reconcileCheckout(session, now);
-  if (reconciled.session.status !== 'PROCESSING') return reconciled;
-  if (input.outcome.kind === 'UNKNOWN') return unchanged(session);
+
+  if (reconciled.session.status !== 'PROCESSING') {
+    return reconciled;
+  }
+
+  if (input.outcome.kind === 'UNKNOWN') {
+    return unchanged(session);
+  }
+
   if (input.outcome.kind === 'SUCCEEDED') {
     const order: Order = {
       id: input.orderId,
@@ -396,6 +472,7 @@ export function settleCheckout(
       quote: session.quote,
       createdAt: now,
     };
+
     return {
       session: {
         ...base(session),
@@ -414,10 +491,12 @@ export function settleCheckout(
       events: ['checkout_completed'],
     };
   }
+
   const fenced: InventoryEffect = {
     kind: 'FENCE_ATTEMPT',
     attemptId: session.attemptId,
   };
+
   if (input.outcome.kind === 'DECLINED' || session.paymentAttemptCount === 3) {
     return {
       session: {
@@ -434,6 +513,7 @@ export function settleCheckout(
       events: ['payment_failed'],
     };
   }
+
   if (Date.parse(now) >= Date.parse(session.reservationExpiresAt)) {
     return {
       session: { ...base(session), status: 'EXPIRED' },
@@ -444,6 +524,7 @@ export function settleCheckout(
       events: ['checkout_expired'],
     };
   }
+
   return {
     session: {
       ...base(session),
@@ -462,6 +543,7 @@ export function settleCheckout(
     events: ['payment_retryable'],
   };
 }
+
 function allocationKey(allocation: SeatAllocation) {
   return JSON.stringify(
     allocation.kind === 'ASSIGNED'
@@ -469,18 +551,25 @@ function allocationKey(allocation: SeatAllocation) {
       : [allocation.kind, allocation.section, allocation.quantity],
   );
 }
+
 export function recoverCheckout(
   expired: CheckoutSession,
   input: Parameters<typeof createCheckout>[0],
   now: Instant,
   policy: CheckoutPolicy,
 ): CheckoutDecision {
-  if (Date.parse(now) >= Date.parse(expired.recoveryRetainUntil))
+  if (Date.parse(now) >= Date.parse(expired.recoveryRetainUntil)) {
     fail('NOT_FOUND', 'Recovery metadata expired');
-  if (reconcileCheckout(expired, now).session.status !== 'EXPIRED')
+  }
+
+  if (reconcileCheckout(expired, now).session.status !== 'EXPIRED') {
     fail('TERMINAL_SESSION', 'Only expired checkout may recover');
-  if (expired.status === 'EXPIRED' && expired.successorSessionId)
+  }
+
+  if (expired.status === 'EXPIRED' && expired.successorSessionId) {
     fail('VERSION_CONFLICT', 'Return the existing successor instead');
+  }
+
   if (
     input.id === expired.id ||
     input.reservationId === expired.reservationId ||
@@ -493,9 +582,12 @@ export function recoverCheckout(
       'Recovery must use a new identity and the original selection',
     );
   }
+
   const fresh = createCheckout(input, now, policy);
+
   return { ...fresh, events: ['checkout_recovered'] };
 }
+
 /** Pure rule + future atomic command only; no developer control is wired here. */
 export function changeCheckoutDeadline(
   session: CheckoutSession,
@@ -503,8 +595,10 @@ export function changeCheckoutDeadline(
   now: Instant,
   policy: CheckoutPolicy,
 ): CheckoutDecision {
-  if (!input.authorized)
+  if (!input.authorized) {
     fail('UNAUTHORIZED', 'Explicit demo authorization required');
+  }
+
   validateCheckoutPolicy(policy);
   instant(input.expiresAt);
   editable(session, now);
@@ -516,6 +610,7 @@ export function changeCheckoutDeadline(
     recoveryRetainUntil: after(input.expiresAt, policy.retentionAfterExpiryMs),
   };
   const projected = reconcileCheckout(updated, now);
+
   return projected.session.status === 'EXPIRED'
     ? projected
     : {

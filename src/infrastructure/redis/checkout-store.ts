@@ -92,12 +92,15 @@ interface Plan {
   response: Result<TransactionValue>;
 }
 const pass = <T>(value: T): Result<T> => ({ ok: true, value });
+
 function fail(code: DomainErrorCode): never {
   throw new DomainError(code, code);
 }
+
 function parse<T>(value: T | string): T {
   return typeof value === 'string' ? (JSON.parse(value) as T) : value;
 }
+
 function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) =>
     item && typeof item === 'object' && !Array.isArray(item)
@@ -107,6 +110,7 @@ function canonical(value: unknown): string {
       : item,
   );
 }
+
 function allocationKey(a: SeatAllocation) {
   return JSON.stringify(
     a.kind === 'ASSIGNED'
@@ -114,6 +118,7 @@ function allocationKey(a: SeatAllocation) {
       : [a.kind, a.section, a.quantity],
   );
 }
+
 function seatKey(
   a: Extract<SeatAllocation, { kind: 'ASSIGNED' }>,
   seat: number,
@@ -133,8 +138,11 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
     private readonly retention = { replayMs: REPLAY_RETENTION_MS },
   ) {
     identifierSchema.parse(namespace);
-    if (!Number.isSafeInteger(retention.replayMs) || retention.replayMs <= 0)
+
+    if (!Number.isSafeInteger(retention.replayMs) || retention.replayMs <= 0) {
       throw new RangeError('Invalid replay retention');
+    }
+
     this.prefix = `checkout:{${namespace}}:`;
   }
   sessionKey(id: string) {
@@ -157,14 +165,28 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
    */
   private async snapshot(scope: Scope): Promise<Snapshot> {
     const needed = new Set<string>();
+
     const addSession = (id: string) => {
       needed.add(this.sessionKey(id));
       needed.add(this.receiptKey(id));
     };
-    if (scope.sessionId) addSession(scope.sessionId);
-    if (scope.successorId) addSession(scope.successorId);
-    if (scope.listingId) needed.add(this.inventoryKey(scope.listingId));
-    if (scope.orderId) needed.add(this.orderKey(scope.orderId));
+
+    if (scope.sessionId) {
+      addSession(scope.sessionId);
+    }
+
+    if (scope.successorId) {
+      addSession(scope.successorId);
+    }
+
+    if (scope.listingId) {
+      needed.add(this.inventoryKey(scope.listingId));
+    }
+
+    if (scope.orderId) {
+      needed.add(this.orderKey(scope.orderId));
+    }
+
     for (let pass = 0; pass < 64; pass++) {
       const keys = [...needed].sort();
       const value = parse(
@@ -177,51 +199,70 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       const index = emptyWorkingSet();
       const documents: Snapshot['documents'] = new Map();
       const inventories: InventoryDocument[] = [];
+
       for (const [i, key] of keys.entries()) {
-        if (!value.raw[i]) continue;
+        if (!value.raw[i]) {
+          continue;
+        }
+
         const document = wire(JSON.parse(value.raw[i]!), true) as
           | SessionDocument
           | CompletionReceipt
           | OrderDocument
           | InventoryDocument;
-        if (document.schemaVersion !== 2)
+
+        if (document.schemaVersion !== 2) {
           throw new Error('Unsupported persistence schema');
+        }
+
         documents.set(key, document);
+
         if ('session' in document) {
           const checkout = session(document.session);
+
           validateAllocation(checkout.allocation);
+
           if (
             key !== this.sessionKey(checkout.id) ||
             Object.keys(document.attempts).length > 3 ||
             Object.keys(document.ledger).length > 3
-          )
+          ) {
             throw new Error('Invalid checkout document');
+          }
+
           index.sessions[checkout.id] = checkout;
           Object.assign(index.attempts, document.attempts);
           Object.assign(index.ledger, document.ledger);
           needed.add(this.inventoryKey(checkout.listingId));
+
           if (
             checkout.id === scope.sessionId &&
             checkout.status === 'EXPIRED' &&
             checkout.successorSessionId
-          )
+          ) {
             addSession(checkout.successorSessionId);
+          }
         } else if ('entry' in document) {
           const completed = session(document.entry.final?.session);
+
           if (
             key !== this.receiptKey(document.sessionId) ||
             completed.status !== 'COMPLETED' ||
             completed.id !== document.sessionId ||
             completed.orderId !== document.orderId ||
             completed.listingId !== document.listingId
-          )
+          ) {
             throw new Error('Invalid completion receipt');
+          }
+
           index.orderBySession[document.sessionId] = document.orderId;
           index.ledger[document.ledgerKey] = document.entry;
           needed.add(this.inventoryKey(document.listingId));
         } else if ('order' in document) {
-          if (key !== this.orderKey(document.order.id))
+          if (key !== this.orderKey(document.order.id)) {
             throw new Error('Invalid order document');
+          }
+
           index.orders[document.order.id] = document.order;
           index.digests[document.order.id] = document.digest;
         } else {
@@ -230,9 +271,12 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
             !Array.isArray(document.soldSeats) &&
             document.soldSeats &&
             Object.keys(document.soldSeats).length === 0
-          )
+          ) {
             document.soldSeats = [];
+          }
+
           const listing = Object.values(document.listings)[0];
+
           if (
             !listing ||
             Object.keys(document.listings).length !== 1 ||
@@ -242,25 +286,35 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
             !Number.isSafeInteger(document.soldQuantity) ||
             document.soldQuantity < 0 ||
             !Array.isArray(document.soldSeats)
-          )
+          ) {
             throw new Error('Invalid inventory document');
+          }
+
           validateAllocation(listing.allocation);
           inventories.push(document);
+
           for (const hold of Object.values(document.reservations)) {
             if (
               hold.status === 'HELD' &&
               (hold.processingDeadlineMs ?? hold.expiresAtMs) <= value.nowMs
-            )
+            ) {
               addSession(hold.sessionId);
+            }
           }
         }
       }
-      if (needed.size !== keys.length) continue;
+
+      if (needed.size !== keys.length) {
+        continue;
+      }
+
       // Receipt remains usable after temporary session metadata has been collected.
-      for (const document of documents.values())
+      for (const document of documents.values()) {
         if ('entry' in document && !get(index.sessions, document.sessionId)) {
           index.sessions[document.sessionId] = document.entry.final!.session;
         }
+      }
+
       return {
         ...value,
         keys,
@@ -272,13 +326,18 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         ),
       };
     }
+
     throw new Error('Persistence routing changed repeatedly');
   }
   private find(s: Snapshot, listingId: string) {
     for (const inventory of s.inventories) {
       const listing = get(inventory.listings, listingId);
-      if (listing) return { inventory, listing };
+
+      if (listing) {
+        return { inventory, listing };
+      }
     }
+
     return fail('NOT_FOUND');
   }
   private now(s: Snapshot) {
@@ -293,6 +352,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
   private apply(s: Snapshot, decision: CheckoutDecision) {
     const checkout = decision.session;
     const { inventory, listing } = this.find(s, checkout.listingId);
+
     // Validate effects before mutating the candidate; it is committed only by CAS.
     for (const effect of decision.effects) {
       if (effect.kind === 'RESERVE') {
@@ -300,14 +360,20 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           kind: 'EXACT',
           allocation: effect.allocation,
         });
-        if (get(inventory.reservations, effect.reservationId))
+
+        if (get(inventory.reservations, effect.reservationId)) {
           fail('RESERVATION_CONFLICT');
+        }
+
         const availability = this.availability(s, listing.id);
+
         if (effect.allocation.kind === 'GENERAL_ADMISSION') {
-          if (availability.counts.available < effect.allocation.quantity)
+          if (availability.counts.available < effect.allocation.quantity) {
             fail('INVENTORY_UNAVAILABLE');
+          }
         } else {
           const selected = effect.allocation;
+
           if (
             !availability.available.some(
               (a) =>
@@ -316,37 +382,50 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
                 a.row === selected.row &&
                 selected.seats.every((n) => a.seats.includes(n)),
             )
-          )
+          ) {
             fail('INVENTORY_UNAVAILABLE');
+          }
         }
       } else if (effect.kind !== 'FENCE_ATTEMPT') {
         const hold = get(inventory.reservations, effect.reservationId);
+
         if (
           (!hold && effect.kind !== 'RELEASE') ||
           (hold && hold.sessionId !== checkout.id)
-        )
+        ) {
           fail('RESERVATION_CONFLICT');
+        }
+
         if (
           effect.kind === 'SELL' &&
           (!hold ||
             hold.status !== 'HELD' ||
             (hold.processingDeadlineMs ?? hold.expiresAtMs) <= s.nowMs)
-        )
+        ) {
           fail('RESERVATION_EXPIRED');
+        }
       }
     }
+
     if (
       decision.order &&
       (get(s.index.orderBySession, checkout.id) ||
         get(s.index.orders, decision.order.id))
-    )
+    ) {
       fail('TERMINAL_SESSION');
+    }
+
     for (const effect of decision.effects) {
       if (effect.kind === 'FENCE_ATTEMPT') {
         const attempt = get(s.index.attempts, effect.attemptId);
-        if (attempt) attempt.status = 'FENCED';
+
+        if (attempt) {
+          attempt.status = 'FENCED';
+        }
+
         continue;
       }
+
       if (effect.kind === 'RESERVE') {
         inventory.reservations[effect.reservationId] = {
           id: effect.reservationId,
@@ -361,25 +440,37 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         };
       } else {
         const hold = inventory.reservations[effect.reservationId];
-        if (!hold) continue;
+
+        if (!hold) {
+          continue;
+        }
+
         if (effect.kind === 'PROTECT') {
           hold.processingDeadlineMs = Date.parse(effect.until);
           hold.attemptId = effect.attemptId;
         }
+
         if (effect.kind === 'RESTORE_BUSINESS_HOLD') {
           delete hold.processingDeadlineMs;
           delete hold.attemptId;
           hold.expiresAtMs = Date.parse(effect.until);
         }
-        if (effect.kind === 'RELEASE') hold.status = 'RELEASED';
+
+        if (effect.kind === 'RELEASE') {
+          hold.status = 'RELEASED';
+        }
+
         if (effect.kind === 'SELL') {
           hold.status = 'SOLD';
           hold.orderId = effect.orderId;
         }
       }
+
       inventory.version++;
     }
+
     s.index.sessions[checkout.id] = checkout;
+
     if (decision.order) {
       s.index.orders[decision.order.id] = decision.order;
       s.index.orderBySession[checkout.id] = decision.order.id;
@@ -387,12 +478,17 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
   }
   private reconcile(s: Snapshot) {
     const now = this.now(s);
+
     // Fence processing and release its inventory TOGETHER, before availability.
     for (const checkout of Object.values(s.index.sessions)) {
       const decision = reconcileCheckout(checkout, now);
-      if (decision.session !== checkout) this.apply(s, decision);
+
+      if (decision.session !== checkout) {
+        this.apply(s, decision);
+      }
     }
-    for (const inventory of s.inventories)
+
+    for (const inventory of s.inventories) {
       for (const hold of Object.values(inventory.reservations)) {
         if (
           hold.status === 'HELD' &&
@@ -402,23 +498,31 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           inventory.version++;
           const attempt =
             hold.attemptId && get(s.index.attempts, hold.attemptId);
-          if (attempt) attempt.status = 'FENCED';
+
+          if (attempt) {
+            attempt.status = 'FENCED';
+          }
         }
       }
+    }
   }
   private projectQuote(s: Snapshot, checkout: CheckoutSession) {
     const effective = reconcileCheckout(checkout, this.now(s)).session;
+
     if (
       !['ACTIVE', 'PRICE_REVIEW', 'PAYMENT_RETRYABLE'].includes(
         effective.status,
       )
-    )
+    ) {
       return {
         session: effective,
         effects: [],
         events: [],
       } as CheckoutDecision;
+    }
+
     const listing = this.find(s, effective.listingId).listing;
+
     return refreshCheckoutQuote(
       effective,
       quoteSelection(listing, allocationQuantity(effective.allocation)),
@@ -428,23 +532,31 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
   }
   private boundary(s: Snapshot): number | undefined {
     const values: number[] = [];
+
     for (const checkout of Object.values(s.index.sessions)) {
       values.push(Date.parse(checkout.recoveryRetainUntil));
-      if (checkout.status === 'PROCESSING')
+
+      if (checkout.status === 'PROCESSING') {
         values.push(Date.parse(checkout.processingDeadlineAt));
-      else if (
+      } else if (
         ['ACTIVE', 'PRICE_REVIEW', 'PAYMENT_RETRYABLE'].includes(
           checkout.status,
         )
-      )
+      ) {
         values.push(Date.parse(checkout.reservationExpiresAt));
-    }
-    for (const inventory of s.inventories)
-      for (const hold of Object.values(inventory.reservations)) {
-        if (hold.status === 'HELD')
-          values.push(hold.processingDeadlineMs ?? hold.expiresAtMs);
       }
+    }
+
+    for (const inventory of s.inventories) {
+      for (const hold of Object.values(inventory.reservations)) {
+        if (hold.status === 'HELD') {
+          values.push(hold.processingDeadlineMs ?? hold.expiresAtMs);
+        }
+      }
+    }
+
     const future = values.filter((n) => n > s.nowMs);
+
     return future.length ? Math.min(...future) : undefined;
   }
   private async transaction(
@@ -454,32 +566,43 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
     for (let retry = 0; retry < 64; retry++) {
       const s = await this.snapshot(scope);
       const validBefore = this.boundary(s);
+
       this.reconcile(s);
       const plan = make(s);
       const values = new Map<string, unknown>();
+
       for (const inventory of s.inventories) {
         // Only live holds remain in inventory. Sales become a bounded occupancy
         // summary; their order and permanent completion fence live separately.
         for (const [id, hold] of Object.entries(inventory.reservations)) {
           if (hold.status === 'SOLD') {
             inventory.soldQuantity += allocationQuantity(hold.allocation);
-            if (hold.allocation.kind === 'ASSIGNED')
+
+            if (hold.allocation.kind === 'ASSIGNED') {
               inventory.soldSeats.push(...hold.allocation.seats);
+            }
           }
-          if (hold.status !== 'HELD') delete inventory.reservations[id];
+
+          if (hold.status !== 'HELD') {
+            delete inventory.reservations[id];
+          }
         }
+
         values.set(
           this.inventoryKey(Object.values(inventory.listings)[0]!.id),
           inventory,
         );
       }
+
       for (const checkout of Object.values(s.index.sessions)) {
         // Never recreate temporary metadata from a permanent receipt.
         if (
           s.documents.has(this.receiptKey(checkout.id)) &&
           !s.documents.has(this.sessionKey(checkout.id))
-        )
+        ) {
           continue;
+        }
+
         const attempts = Object.fromEntries(
           Object.entries(s.index.attempts).filter(
             ([, a]) => a.sessionId === checkout.id,
@@ -490,8 +613,14 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
             ([key]) => JSON.parse(key)[0] === checkout.id,
           ),
         );
-        if (Object.keys(attempts).length > 3 || Object.keys(ledger).length > 3)
+
+        if (
+          Object.keys(attempts).length > 3 ||
+          Object.keys(ledger).length > 3
+        ) {
           throw new Error('Payment history exceeds attempt bound');
+        }
+
         values.set(this.sessionKey(checkout.id), {
           schemaVersion: 2,
           session: checkout,
@@ -499,14 +628,17 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           ledger,
         } satisfies SessionDocument);
       }
+
       if (plan.newOrderId) {
         const order = s.index.orders[plan.newOrderId]!;
+
         values.set(this.orderKey(order.id), {
           schemaVersion: 2,
           order,
           digest: s.index.digests[order.id]!,
         } satisfies OrderDocument);
         const entry = s.index.ledger[plan.finalLedgerKey!]!;
+
         values.set(this.receiptKey(order.checkoutSessionId), {
           schemaVersion: 2,
           sessionId: order.checkoutSessionId,
@@ -516,6 +648,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           entry,
         } satisfies CompletionReceipt);
       }
+
       const response = plan.response.ok
         ? plan.response
         : {
@@ -559,27 +692,43 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           { committed: boolean; response?: unknown } | string
         >(COMMIT_LUA, s.keys, [JSON.stringify(wire(proposal))]),
       );
-      if (!result.committed) continue;
+
+      if (!result.committed) {
+        continue;
+      }
+
       const decoded = wire(result.response, true) as
         | { ok: true; value: TransactionValue }
         | { ok: false; code: DomainErrorCode; message?: string };
-      if (!decoded.ok)
+
+      if (!decoded.ok) {
         return {
           ok: false,
           error: new DomainError(decoded.code, decoded.message ?? decoded.code),
         };
+      }
+
       const value = decoded.value;
+
       if ('session' in value) {
-        if (!Array.isArray(value.events)) Object.assign(value, { events: [] });
+        if (!Array.isArray(value.events)) {
+          Object.assign(value, { events: [] });
+        }
+
         session(value.session);
       } else {
-        if (!Array.isArray(value.available))
+        if (!Array.isArray(value.available)) {
           Object.assign(value, { available: [] });
-        if (!Array.isArray(value.ownReservations))
+        }
+
+        if (!Array.isArray(value.ownReservations)) {
           Object.assign(value, { ownReservations: [] });
+        }
       }
+
       return pass(value);
     }
+
     return {
       ok: false,
       error: new DomainError(
@@ -595,6 +744,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         events.map((event) => this.seeds.listListings(event.id)),
       )
     ).flat();
+
     validateCatalog(events, listings);
     const legacy = [
       this.prefix + 'checkouts:v1',
@@ -620,15 +770,20 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         [JSON.stringify({ legacyCount: legacy.length, values: documents })],
       ),
     );
-    if (!result.seeded)
+
+    if (!result.seeded) {
       throw new Error(result.error ?? 'Catalog initialization failed');
+    }
   }
   async read(id: string) {
     identifierSchema.parse(id);
     const s = await this.snapshot({ sessionId: id });
     const stored = get(s.index.sessions, id);
-    if (!stored || Date.parse(stored.recoveryRetainUntil) <= s.nowMs)
+
+    if (!stored || Date.parse(stored.recoveryRetainUntil) <= s.nowMs) {
       return null;
+    }
+
     return {
       session: this.projectQuote(s, stored).session,
       serverNow: this.now(s),
@@ -639,12 +794,15 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
     policy: CheckoutPolicy,
   ): Promise<Result<CheckoutMutation>> {
     validateCheckoutPolicy(policy);
+
     // Deadline edits have no production authorization implementation before Wave 05.
-    if (command.kind === 'CHANGE_DEADLINE')
+    if (command.kind === 'CHANGE_DEADLINE') {
       return {
         ok: false,
         error: new DomainError('UNAUTHORIZED', 'Demo controls are not enabled'),
       };
+    }
+
     const scope: Scope =
       command.kind === 'RESERVE'
         ? { sessionId: command.sessionId, listingId: command.listingId }
@@ -662,9 +820,15 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
     const result = await this.transaction(scope, (s) =>
       this.plan(s, command, policy),
     );
-    if (!result.ok) return result;
-    if (!('session' in result.value))
+
+    if (!result.ok) {
+      return result;
+    }
+
+    if (!('session' in result.value)) {
       throw new Error('Invalid checkout result');
+    }
+
     return pass(result.value);
   }
   private plan(
@@ -687,11 +851,13 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       serverNow: now,
       events,
     });
+
     const relative = (
       checkout: CheckoutSession,
       mode: 'CREATE' | 'PROTECT',
     ) => {
       const i = s.keys.indexOf(this.inventoryKey(checkout.listingId));
+
       plan.relative.push({
         inventoryKeyIndex: i + 1,
         sessionKeyIndex: s.keys.indexOf(this.sessionKey(checkout.id)) + 1,
@@ -701,25 +867,36 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         processingMs: policy.processingMs,
       });
     };
+
     try {
       if (command.kind === 'RESERVE') {
         const existing = get(s.index.sessions, command.sessionId);
-        if (get(s.index.orderBySession, command.sessionId))
+
+        if (get(s.index.orderBySession, command.sessionId)) {
           fail('TERMINAL_SESSION');
+        }
+
         if (existing) {
           if (
             existing.reservationId !== command.reservationId ||
             existing.listingId !== command.listingId ||
             allocationKey(existing.allocation) !==
               allocationKey(command.allocation)
-          )
+          ) {
             fail('RESERVATION_CONFLICT');
+          }
+
           plan.response = pass(updated(existing));
+
           return plan;
         }
+
         const listing = this.find(s, command.listingId).listing;
-        if (listing.version !== command.expectedListingVersion)
+
+        if (listing.version !== command.expectedListingVersion) {
           fail('VERSION_CONFLICT');
+        }
+
         const decision = createCheckout(
           {
             id: command.sessionId,
@@ -730,16 +907,20 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           now,
           policy,
         );
+
         this.apply(s, decision);
         events = [...decision.events];
         relative(decision.session, 'CREATE');
         plan.response = pass(updated(decision.session));
+
         return plan;
       }
+
       const id =
         command.kind === 'RECOVER'
           ? command.expiredSessionId
           : command.sessionId;
+
       // Final operation replay outlives the checkout's recovery/read horizon.
       if (
         command.kind === 'CLAIM_COMPLETION' ||
@@ -747,59 +928,80 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       ) {
         const key = ledgerKey(id, command.idempotencyKey);
         const cached = get(s.index.ledger, key);
+
         if (cached?.final) {
           if (
             cached.callerId !== command.callerId ||
             (command.kind === 'CLAIM_COMPLETION'
               ? cached.fingerprint !== fingerprint(command)
               : cached.attemptId !== command.attemptId)
-          )
+          ) {
             fail('IDEMPOTENCY_CONFLICT');
+          }
+
           plan.replayLedgerKey = key;
           plan.response = pass(cached.final);
+
           return plan;
         }
       }
+
       let current = get(s.index.sessions, id);
+
       if (
         command.kind === 'CLAIM_COMPLETION' &&
         current?.status === 'COMPLETED' &&
         get(s.index.orderBySession, id)
-      )
+      ) {
         fail('TERMINAL_SESSION');
-      if (!current || Date.parse(current.recoveryRetainUntil) <= s.nowMs)
+      }
+
+      if (!current || Date.parse(current.recoveryRetainUntil) <= s.nowMs) {
         fail('NOT_FOUND');
+      }
+
       const quoted =
         command.kind === 'REFRESH_QUOTE' &&
         command.expectedVersion === current.version
           ? ({ session: current, effects: [], events: [] } as CheckoutDecision)
           : this.projectQuote(s, current);
+
       if (quoted.session !== current) {
         this.apply(s, quoted);
         current = quoted.session;
         events = [...quoted.events];
       }
+
       if (command.kind === 'CLAIM_COMPLETION') {
         const key = ledgerKey(id, command.idempotencyKey);
         const entry = get(s.index.ledger, key);
+
         if (entry) {
           if (
             entry.callerId !== command.callerId ||
             entry.fingerprint !== fingerprint(command)
-          )
+          ) {
             fail('IDEMPOTENCY_CONFLICT');
+          }
+
           if (entry.final) {
             plan.replayLedgerKey = key;
             plan.response = pass(entry.final);
+
             return plan;
           }
+
           plan.response = pass(updated(current, 'IN_PROGRESS'));
+
           return plan;
         }
+
         if (current.status === 'PROCESSING') {
           plan.response = pass(updated(current, 'IN_PROGRESS'));
+
           return plan;
         }
+
         const hold = this.hold(s, current);
         const decision = claimCheckout(
           current,
@@ -823,6 +1025,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           },
           policy,
         );
+
         this.apply(s, decision);
         events.push(...decision.events);
         relative(decision.session, 'PROTECT');
@@ -838,49 +1041,72 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           status: 'PROCESSING',
           ordinal: decision.session.paymentAttemptCount,
         };
-        if (decision.session.status !== 'PROCESSING')
+
+        if (decision.session.status !== 'PROCESSING') {
           throw new Error('Invalid claim decision');
+        }
+
         plan.response = pass({
           ...updated(decision.session),
           kind: 'CLAIMED',
           session: decision.session,
         });
+
         return plan;
       }
+
       if (command.kind === 'SETTLE_PAYMENT') {
         const key = ledgerKey(id, command.idempotencyKey);
         const entry = get(s.index.ledger, key);
+
         if (
           !entry ||
           entry.callerId !== command.callerId ||
           entry.attemptId !== command.attemptId
-        )
+        ) {
           fail('IDEMPOTENCY_CONFLICT');
+        }
+
         if (entry.final) {
           plan.replayLedgerKey = key;
           plan.response = pass(entry.final);
+
           return plan;
         }
+
         const attempt = get(s.index.attempts, command.attemptId);
-        if (!attempt) fail('VERSION_CONFLICT');
+
+        if (!attempt) {
+          fail('VERSION_CONFLICT');
+        }
+
         let mutation: CheckoutMutation;
-        if (attempt.status === 'FENCED') mutation = updated(current);
-        else {
+
+        if (attempt.status === 'FENCED') {
+          mutation = updated(current);
+        } else {
           const owned = this.hold(s, current);
+
           if (
             !owned ||
             owned.status !== 'HELD' ||
             owned.sessionId !== id ||
             owned.attemptId !== command.attemptId
-          )
+          ) {
             fail('RESERVATION_CONFLICT');
+          }
+
           const decision = settleCheckout(current, command, now);
+
           this.apply(s, decision);
           events.push(...decision.events);
           mutation = updated(decision.session);
+
           if (decision.order) {
-            if (decision.session.status !== 'COMPLETED')
+            if (decision.session.status !== 'COMPLETED') {
               throw new Error('Order must complete checkout');
+            }
+
             s.index.digests[decision.order.id] = command.capabilityDigest;
             mutation = {
               ...mutation,
@@ -893,26 +1119,42 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           } else if (
             command.outcome.kind !== 'UNKNOWN' &&
             s.index.attempts[command.attemptId]?.status !== 'FENCED'
-          )
+          ) {
             attempt.status = command.outcome.kind;
+          }
         }
+
         if (mutation.session.status !== 'PROCESSING') {
           entry.final = mutation;
           plan.finalLedgerKey = key;
         }
+
         plan.response = pass(mutation);
+
         return plan;
       }
+
       if (command.kind === 'RECOVER') {
-        if (current.status !== 'EXPIRED') fail('TERMINAL_SESSION');
+        if (current.status !== 'EXPIRED') {
+          fail('TERMINAL_SESSION');
+        }
+
         if (current.successorSessionId) {
           const successor = get(s.index.sessions, current.successorSessionId);
-          if (!successor) fail('NOT_FOUND');
+
+          if (!successor) {
+            fail('NOT_FOUND');
+          }
+
           plan.response = pass(updated(successor));
+
           return plan;
         }
-        if (get(s.index.sessions, command.successorId))
+
+        if (get(s.index.sessions, command.successorId)) {
           fail('RESERVATION_CONFLICT');
+        }
+
         const decision = recoverCheckout(
           current,
           {
@@ -924,6 +1166,7 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           now,
           policy,
         );
+
         this.apply(s, decision);
         relative(decision.session, 'CREATE');
         events.push(...decision.events);
@@ -933,12 +1176,16 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           version: version(current.version + 1),
         };
         plan.response = pass(updated(decision.session));
+
         return plan;
       }
+
       if (command.kind === 'EXPIRE_IF_DUE') {
         plan.response = pass(updated(current));
+
         return plan;
       }
+
       const quote = quoteSelection(
         this.find(s, current.listingId).listing,
         allocationQuantity(current.allocation),
@@ -947,13 +1194,18 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         command.kind === 'REFRESH_QUOTE'
           ? refreshCheckoutQuote(current, quote, command.expectedVersion, now)
           : acceptCheckoutQuote(current, command, { now, currentQuote: quote });
+
       this.apply(s, decision);
       events.push(...decision.events);
       plan.response = pass(updated(decision.session));
     } catch (error) {
-      if (error instanceof DomainError) plan.response = { ok: false, error };
-      else throw error;
+      if (error instanceof DomainError) {
+        plan.response = { ok: false, error };
+      } else {
+        throw error;
+      }
     }
+
     return plan;
   }
   private availability(
@@ -977,12 +1229,14 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         .reduce((n, r) => n + allocationQuantity(r.allocation), 0);
     const total = allocationQuantity(listing.allocation);
     const available: SeatAllocation[] = [];
+
     if (listing.allocation.kind === 'GENERAL_ADMISSION') {
-      if (total > held + sold)
+      if (total > held + sold) {
         available.push({
           ...listing.allocation,
           quantity: total - held - sold,
         });
+      }
     } else {
       const pool = listing.allocation;
       const blocked = new Set([
@@ -999,18 +1253,26 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
         ),
       ]);
       let run: number[] = [];
+
       for (const n of pool.seats) {
         if (blocked.has(seatKey(pool, n))) {
           run = [];
           continue;
         }
+
         if (!run.length) {
           run = [n];
           available.push({ ...pool, seats: run as [number, ...number[]] });
-        } else run.push(n);
+        } else {
+          run.push(n);
+        }
       }
     }
-    if (held + sold > total) throw new Error('Inventory conservation violated');
+
+    if (held + sold > total) {
+      throw new Error('Inventory conservation violated');
+    }
+
     return {
       available,
       counts: { total, available: total - held - sold, held, sold },
@@ -1043,9 +1305,15 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
       relative: [],
       response: pass(this.availability(s, listingId, ownerSessionId)),
     }));
-    if (!result.ok) throw result.error;
-    if (!('counts' in result.value))
+
+    if (!result.ok) {
+      throw result.error;
+    }
+
+    if (!('counts' in result.value)) {
       throw new Error('Invalid availability result');
+    }
+
     return result.value;
   }
   async getConfirmation(
@@ -1056,12 +1324,13 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
     const order = get(s.index.orders, orderId);
     const stored = get(s.index.digests, orderId);
     const digest = createHash('sha256').update(capability).digest('hex');
+
     if (
       !order ||
       !stored ||
       stored.length !== digest.length ||
       !timingSafeEqual(Buffer.from(stored), Buffer.from(digest))
-    )
+    ) {
       return {
         ok: false,
         error: new DomainError(
@@ -1069,20 +1338,27 @@ export class RedisCheckoutStore implements CheckoutRepository, OrderRepository {
           'Confirmation capability required',
         ),
       };
+    }
+
     return pass(order);
   }
   /** Current persisted listing data for catalog/API reads, never stale seed prices. */
   async getListing(id: string) {
     const s = await this.snapshot({ listingId: id });
+
     try {
       return this.find(s, id).listing;
     } catch (error) {
-      if (error instanceof DomainError) return null;
+      if (error instanceof DomainError) {
+        return null;
+      }
+
       throw error;
     }
   }
   async listListings(eventId: string) {
     const definitions = await this.seeds.listListings(eventId);
+
     return (
       await Promise.all(
         definitions.map((listing) => this.getListing(listing.id)),

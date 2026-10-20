@@ -24,15 +24,19 @@ export class SimulatedPayment implements Payment {
         'DECLINE',
         'UNKNOWN',
       ].includes(scenario)
-    )
+    ) {
       throw new RangeError('Unknown payment scenario');
-    if (!Number.isSafeInteger(delayMs) || delayMs < 0 || delayMs > 2000)
+    }
+
+    if (!Number.isSafeInteger(delayMs) || delayMs < 0 || delayMs > 2000) {
       throw new RangeError('Simulator latency must be 0–2000ms');
+    }
   }
   async attempt(
     input: Parameters<Payment['attempt']>[0],
   ): Promise<PaymentOutcome> {
     await this.pause(this.delayMs);
+
     switch (this.scenario) {
       case 'UNKNOWN':
         return { kind: 'UNKNOWN' };
@@ -40,9 +44,13 @@ export class SimulatedPayment implements Payment {
         return { kind: 'DECLINED' };
       case 'ALWAYS_TRANSIENT':
         return { kind: 'TRANSIENT_FAILURE' };
+
       case 'TRANSIENT_THEN_SUCCESS':
-        if (input.attemptNumber === 1) return { kind: 'TRANSIENT_FAILURE' };
+        if (input.attemptNumber === 1) {
+          return { kind: 'TRANSIENT_FAILURE' };
+        }
     }
+
     return { kind: 'SUCCEEDED', reference: `simulated:${input.attemptId}` };
   }
 }

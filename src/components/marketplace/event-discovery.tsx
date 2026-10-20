@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -23,6 +24,7 @@ export function EventDiscovery({
     ({ event }) =>
       category === 'All events' || eventArt[event.id]?.category === category,
   );
+
   return (
     <section id="events" className="discovery">
       <div className="section-heading">

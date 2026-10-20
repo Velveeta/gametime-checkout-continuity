@@ -7,8 +7,9 @@ import type { CompletionCapability } from '../../domain/models';
  */
 export class HmacCompletionAuthority implements CompletionAuthority {
   constructor(private readonly secret: string) {
-    if (Buffer.byteLength(secret) < 32)
+    if (Buffer.byteLength(secret) < 32) {
       throw new RangeError('Completion secret must be at least 32 bytes');
+    }
   }
   issue(input: Parameters<CompletionAuthority['issue']>[0]) {
     const binding = JSON.stringify([
@@ -20,6 +21,7 @@ export class HmacCompletionAuthority implements CompletionAuthority {
     const capability = createHmac('sha256', this.secret)
       .update(binding)
       .digest('base64url') as CompletionCapability;
+
     return {
       capability,
       digest: createHash('sha256').update(capability).digest('hex'),

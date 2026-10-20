@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { request, RequestError, rememberAttempt, savedAttempt } from './http';
+
 let values: Map<string, string>;
+
 beforeEach(() => {
   values = new Map();
   vi.stubGlobal('sessionStorage', {
@@ -12,6 +14,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 it('persists the exact request key and price versions for safe retries', () => {
   const attempt = { key: 'request-123', expectedVersion: 4, quoteVersion: 2 };
+
   rememberAttempt('checkout', attempt);
   expect(savedAttempt('checkout')).toEqual(attempt);
   rememberAttempt('checkout', null);
@@ -65,6 +68,7 @@ it('uses no-store and a bounded request signal', async () => {
   const fetcher = vi.fn(async () =>
     Response.json({ ok: true, data: { id: 'session' } }),
   );
+
   vi.stubGlobal('fetch', fetcher);
   await request('/checkout', { method: 'POST', body: '{}' });
   expect(fetcher).toHaveBeenCalledWith(

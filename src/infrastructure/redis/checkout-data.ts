@@ -36,6 +36,7 @@ const money = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const timestamp = z.string().refine((v) => {
   try {
     instant(v);
+
     return true;
   } catch {
     return false;
@@ -66,6 +67,7 @@ const base = z.object({
 });
 const idleCount = z.union([z.literal(0), z.literal(1), z.literal(2)]);
 const attemptCount = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+
 export const sessionSchema = z.discriminatedUnion('status', [
   base
     .extend({ status: z.literal('ACTIVE'), paymentAttemptCount: idleCount })
@@ -163,6 +165,7 @@ export interface CheckoutWorkingSet {
   attempts: Record<string, AttemptRecord>;
   ledger: Record<string, LedgerEntry>;
 }
+
 export function emptyWorkingSet(): CheckoutWorkingSet {
   return {
     sessions: {},
@@ -173,6 +176,7 @@ export function emptyWorkingSet(): CheckoutWorkingSet {
     ledger: {},
   };
 }
+
 export const REPLAY_RETENTION_MS = 24 * 60 * 60_000;
 /** At most three attempts/ledger entries; TTL never authorizes releasing stock. */
 export interface SessionDocument {
@@ -202,29 +206,44 @@ const dateKeys = new Set([
   'processingDeadlineAt',
   'serverNow',
 ]);
+
 /** Internal wire uses milliseconds, allowing commit-time deadlines inside Lua. */
 export function wire(value: unknown, decode = false, key = ''): unknown {
   if (dateKeys.has(key)) {
-    if (decode && typeof value === 'number')
+    if (decode && typeof value === 'number') {
       return instant(new Date(value).toISOString());
-    if (!decode && typeof value === 'string') return Date.parse(instant(value));
+    }
+
+    if (!decode && typeof value === 'string') {
+      return Date.parse(instant(value));
+    }
   }
-  if (Array.isArray(value)) return value.map((v) => wire(v, decode));
-  if (value && typeof value === 'object')
+
+  if (Array.isArray(value)) {
+    return value.map((v) => wire(v, decode));
+  }
+
+  if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => [k, wire(v, decode, k)]),
     );
+  }
+
   return value;
 }
+
 export function session(value: unknown): CheckoutSession {
   return sessionSchema.parse(value) as CheckoutSession;
 }
+
 export function get<T>(record: Record<string, T>, id: string): T | undefined {
   return Object.hasOwn(record, id) ? record[id] : undefined;
 }
+
 export function ledgerKey(sessionId: string, key: string) {
   return JSON.stringify([sessionId, key]);
 }
+
 export function fingerprint(
   command: Extract<CheckoutCommand, { kind: 'CLAIM_COMPLETION' }>,
 ) {

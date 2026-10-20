@@ -72,6 +72,7 @@ describe('server configuration', () => {
         UPSTASH_REDIS_REST_TOKEN: 'private-token',
       }),
     ).toThrow(/^Invalid server environment:/);
+
     try {
       parseServerEnv({ DEMO_SECRET: 'sensitive-input' });
     } catch (error) {
@@ -85,6 +86,7 @@ describe('Wave 03 runtime configuration', () => {
     UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
     UPSTASH_REDIS_REST_TOKEN: 'example',
   };
+
   it('requires distinct caller/completion secrets at runtime but not build', () => {
     expect(() => requireCheckoutEnv(credentials)).toThrow(
       'secrets are required',

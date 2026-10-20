@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import qrcode from 'qrcode-generator';
 import Image from 'next/image';
@@ -10,15 +11,19 @@ export function ShareCheckout({ id }: { id: string }) {
   const [url, setUrl] = useState('');
   const [qr, setQr] = useState('');
   const [message, setMessage] = useState('');
+
   function reveal() {
     const value = `${window.location.origin}/checkout/${id}`;
+
     setUrl(value);
     const code = qrcode(0, 'M');
+
     code.addData(value);
     code.make();
     setQr(code.createDataURL(4, 8));
     setOpen(!open);
   }
+
   async function copy() {
     try {
       await navigator.clipboard.writeText(url);
@@ -27,15 +32,19 @@ export function ShareCheckout({ id }: { id: string }) {
       setMessage('Select the link below to copy it.');
     }
   }
+
   async function share() {
     try {
-      if (navigator.share)
+      if (navigator.share) {
         await navigator.share({ title: 'Your Gametime checkout', url });
-      else await copy();
+      } else {
+        await copy();
+      }
     } catch {
       setMessage('You can copy the link instead.');
     }
   }
+
   return (
     <section className="handoff">
       <div>

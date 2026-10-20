@@ -39,6 +39,7 @@ describe('authoritative timestamp format', () => {
 });
 it('preserves typed business failure codes', () => {
   const error = new DomainError('VERSION_CONFLICT', 'Session changed');
+
   expect(error).toBeInstanceOf(Error);
   expect(error.code).toBe('VERSION_CONFLICT');
 });

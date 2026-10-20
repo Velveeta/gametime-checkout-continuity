@@ -20,14 +20,18 @@ export class RedisHarness implements RedisScriptExecutor {
     this.directory = await mkdtemp(join(tmpdir(), 'cc-redis-'));
     this.port = await new Promise<number>((resolve, reject) => {
       const server = createServer();
+
       server.on('error', reject);
       server.listen(0, '127.0.0.1', () => {
         const address = server.address();
+
         if (!address || typeof address === 'string') {
           server.close();
           reject(new Error('No TCP test port'));
+
           return;
         }
+
         server.close((error) =>
           error ? reject(error) : resolve(address.port),
         );
@@ -54,16 +58,25 @@ export class RedisHarness implements RedisScriptExecutor {
     this.process.on('error', (error) => {
       this.startupError = error;
     });
+
     for (let attempt = 0; attempt < 60; attempt++) {
-      if (this.startupError) break;
+      if (this.startupError) {
+        break;
+      }
+
       try {
-        if ((await this.command('PING')) === 'PONG') return;
+        if ((await this.command('PING')) === 'PONG') {
+          return;
+        }
       } catch {
         /* bounded readiness retry */
       }
+
       await delay(25);
     }
+
     await this.stop();
+
     throw new Error(
       'Real Redis integration tests require redis-server and redis-cli >=6.2 on PATH (or REDIS_SERVER/REDIS_CLI paths). The integration suite fails when Redis is unavailable.',
       { cause: this.startupError },
@@ -75,6 +88,7 @@ export class RedisHarness implements RedisScriptExecutor {
       ['-h', '127.0.0.1', '-p', String(this.port), '--raw', ...args],
       { maxBuffer: 4 * 1024 * 1024 },
     );
+
     return stdout.trim();
   }
   async eval<T>(
@@ -89,29 +103,40 @@ export class RedisHarness implements RedisScriptExecutor {
       ...keys,
       ...args.map(String),
     );
+
     return JSON.parse(output) as T;
   }
   async after(deadline: string) {
     const target = Date.parse(deadline);
+
     for (let attempt = 0; attempt < 1500; attempt++) {
       const [seconds, micros] = (await this.command('TIME'))
         .split('\n')
         .map(Number);
-      if (seconds! * 1000 + Math.floor(micros! / 1000) >= target) return;
+
+      if (seconds! * 1000 + Math.floor(micros! / 1000) >= target) {
+        return;
+      }
+
       await delay(10);
     }
+
     throw new Error('Redis clock did not reach the reservation deadline');
   }
   async stop() {
     const child = this.process;
+
     if (child && child.exitCode === null && !this.startupError) {
       const exited = new Promise<void>((resolve) =>
         child.once('exit', () => resolve()),
       );
+
       child.kill('SIGTERM');
       await exited;
     }
-    if (this.directory)
+
+    if (this.directory) {
       await rm(this.directory, { recursive: true, force: true });
+    }
   }
 }

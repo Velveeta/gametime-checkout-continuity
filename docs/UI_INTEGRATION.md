@@ -84,8 +84,14 @@ an API test cover this correction. Persistence and domain interfaces are unchang
 
 ## Formatting and validation
 
-The requested Prettier settings live in `.prettierrc.json`. `npm run format` writes
-formatting; `npm run format:check` verifies it. `npm run check` requires formatting,
+The requested Prettier settings live in `.prettierrc.json`. `npm run format` runs
+ESLint autofixes before Prettier; `npm run format:check` verifies Prettier output.
+ESLint's `curly: all` and maintained `@stylistic` rules require braces on every
+control-flow body, 1TBS placement, and blank lines around blocks, before
+returns/throws, and between imports/declaration groups and subsequent work.
+Consecutive imports and declarations remain grouped; additional section spacing
+is allowed. Prettier cannot add braces or infer logical sections itself.
+`npm run check` requires formatting,
 lint, strict types, unit tests, real Redis/API tests, production build, built HTTP
 integration and Playwright. Existing source was formatted as requested; prior
 specifications/handoffs received formatting only. Generated artifacts, dependencies,

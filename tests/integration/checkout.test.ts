@@ -28,6 +28,7 @@ const allocation =
 let namespace: string;
 const callerSecret = 'caller-test-secret-'.repeat(3);
 const completionSecret = 'completion-test-secret-'.repeat(3);
+
 async function instance(
   options: {
     payment?: Payment;
@@ -52,13 +53,19 @@ async function instance(
     analytics: { record: async () => {} },
   });
 }
+
 function value<T>(result: Result<T>): T {
-  if (!result.ok) throw result.error;
+  if (!result.ok) {
+    throw result.error;
+  }
+
   return result.value;
 }
+
 function code<T>(result: Result<T>) {
   return result.ok ? undefined : result.error.code;
 }
+
 async function create(
   runtime: Awaited<ReturnType<typeof instance>>,
   listingId = listing.id,
@@ -72,6 +79,7 @@ async function create(
     }),
   );
 }
+
 function request(
   s: CheckoutSnapshot,
   key = 'payment',
@@ -85,6 +93,7 @@ function request(
     callerId,
   };
 }
+
 async function price(unitPrice: number, fees: number) {
   await redis.command(
     'EVAL',
@@ -96,6 +105,7 @@ async function price(unitPrice: number, fees: number) {
     String(fees),
   );
 }
+
 function pending() {
   let release!: () => void;
   let entered!: () => void;
@@ -106,6 +116,7 @@ function pending() {
     release = resolve;
   });
   let calls = 0;
+
   return {
     started,
     release: () => release(),
@@ -117,21 +128,26 @@ function pending() {
         calls++;
         entered();
         await gate;
+
         return { kind: 'SUCCEEDED' as const, reference: 'simulated' };
       },
     },
   };
 }
+
 async function conserved(
   runtime: Awaited<ReturnType<typeof instance>>,
   id = listing.id,
 ) {
   const view = await runtime.store.getAvailability(id);
+
   expect(view.counts.total).toBe(
     view.counts.held + view.counts.sold + view.counts.available,
   );
+
   return view.counts;
 }
+
 beforeAll(() => redis.start());
 afterAll(() => redis.stop());
 beforeEach(() => {
@@ -151,6 +167,7 @@ describe('real Redis checkout transactions across independent instances', () => 
         }),
       ),
     );
+
     expect(results.filter((r) => r.ok)).toHaveLength(1);
     expect(
       results
@@ -159,6 +176,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     ).toBe(true);
     const winner = results.find((r) => r.ok)!;
     const c = await instance();
+
     expect(
       value(await c.checkout.getSession(value(winner).session.id)).session.id,
     ).toBe(value(winner).session.id);
@@ -176,6 +194,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     const s = await create(r);
     const key = r.store.sessionKey(s.session.id);
     const before = await redis.command('GET', key);
+
     value(await r.checkout.getSession(s.session.id));
     expect(await redis.command('GET', key)).toBe(before);
     expect(Number(await redis.command('PTTL', key))).toBeGreaterThan(
@@ -191,6 +210,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     expect(await redis.command('GET', key)).toBe(before);
     expect((await conserved(r)).available).toBe(8);
     const replacement = await create(await instance());
+
     expect(replacement.session.id).not.toBe(s.session.id);
   });
   it('one claim protects stock, competing keys do not create duplicate orders, same binding replays', async () => {
@@ -200,29 +220,39 @@ describe('real Redis checkout transactions across independent instances', () => 
     const s = await create(a);
     const input = request(s);
     const original = a.checkout.complete(input);
+
     await payment.started;
     const results = await Promise.all(
       Array.from({ length: 12 }, (_, n) =>
         b.checkout.complete(request(s, `key-${n}`, `device-${n}`)),
       ),
     );
+
     expect(results.every((r) => r.ok && r.value.kind === 'IN_PROGRESS')).toBe(
       true,
     );
     expect(payment.calls).toBe(1);
     payment.release();
     const complete = value(await original);
+
     expect(complete.kind).toBe('COMPLETED');
     const c = await instance();
-    for (let i = 0; i < 3; i++)
+
+    for (let i = 0; i < 3; i++) {
       expect(value(await c.checkout.complete(input))).toEqual(complete);
+    }
+
     expect(
       code(await c.checkout.complete({ ...input, callerId: 'intruder' })),
     ).toBe('IDEMPOTENCY_CONFLICT');
     expect(code(await c.checkout.complete(request(s, 'new-final-key')))).toBe(
       'TERMINAL_SESSION',
     );
-    if (complete.kind !== 'COMPLETED') throw new Error();
+
+    if (complete.kind !== 'COMPLETED') {
+      throw new Error();
+    }
+
     expect(value(await c.checkout.confirm(complete)).id).toBe(complete.orderId);
     expect(await conserved(c)).toEqual({
       total: 8,
@@ -233,6 +263,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     const data = JSON.parse(
       await redis.command('GET', c.store.receiptKey(s.session.id)),
     );
+
     expect(data.orderId).toBe(complete.orderId);
     expect(JSON.stringify(data)).not.toContain(complete.capability);
   });
@@ -244,11 +275,17 @@ describe('real Redis checkout transactions across independent instances', () => 
     });
     const s = await create(a);
     const purchase = a.checkout.complete(request(s));
+
     await payment.started;
     const processing = value(await a.checkout.read(s.session.id)).session;
-    if (processing.status !== 'PROCESSING') throw new Error();
+
+    if (processing.status !== 'PROCESSING') {
+      throw new Error();
+    }
+
     await redis.after(s.session.reservationExpiresAt);
     const b = await instance();
+
     expect((await conserved(b)).held).toBe(2);
     expect(
       code(
@@ -262,8 +299,10 @@ describe('real Redis checkout transactions across independent instances', () => 
     await redis.after(processing.processingDeadlineAt);
     expect((await conserved(b)).available).toBe(8);
     const replacement = await create(b);
+
     payment.release();
     const result = value(await purchase);
+
     expect(result.kind).toBe('UPDATED');
     expect(value(await b.checkout.read(s.session.id)).session).toMatchObject({
       status: 'PAYMENT_FAILED',
@@ -282,6 +321,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     });
     const s = await create(a);
     const purchase = a.checkout.complete(request(s));
+
     await payment.started;
     await redis.after(s.session.reservationExpiresAt);
     payment.release();
@@ -297,8 +337,10 @@ describe('real Redis checkout transactions across independent instances', () => 
       policy: { ...DEFAULT_CHECKOUT_POLICY, holdMs: 150 },
     });
     const s = await create(a);
+
     await redis.after(s.session.reservationExpiresAt);
     const b = await instance();
+
     expect(
       value(
         await b.checkout.enter({
@@ -320,12 +362,17 @@ describe('real Redis checkout transactions across independent instances', () => 
     );
     const ids = results.map((r) => {
       const entry = value(r);
-      if (entry.kind !== 'REDIRECT_CHECKOUT')
+
+      if (entry.kind !== 'REDIRECT_CHECKOUT') {
         throw new Error(JSON.stringify(entry));
+      }
+
       return entry.sessionId;
     });
+
     expect(new Set(ids).size).toBe(1);
     const successor = value(await b.checkout.read(ids[0]!)).session;
+
     expect(successor).toMatchObject({
       status: 'ACTIVE',
       paymentAttemptCount: 0,
@@ -342,12 +389,18 @@ describe('real Redis checkout transactions across independent instances', () => 
       a.checkout.complete(request(s)),
       price(9000, 4000),
     ]);
+
     if (result.ok && result.value.kind === 'COMPLETED') {
       const order = value(await a.checkout.confirm(result.value));
+
       expect(order.quote.total).toBe(s.session.quote.total);
-    } else expect(code(result)).toBe('VERSION_CONFLICT');
+    } else {
+      expect(code(result)).toBe('VERSION_CONFLICT');
+    }
+
     if (!result.ok) {
       const latest = value(await a.checkout.read(s.session.id));
+
       expect(latest.session.status).toBe('PRICE_REVIEW');
       expect(code(await a.checkout.complete(request(latest, 'retry')))).toBe(
         'QUOTE_ACCEPTANCE_REQUIRED',
@@ -359,6 +412,7 @@ describe('real Redis checkout transactions across independent instances', () => 
           quoteVersion: latest.session.quote.version,
         }),
       );
+
       expect(
         value(await a.checkout.complete(request(accepted, 'accepted'))).kind,
       ).toBe('COMPLETED');
@@ -367,9 +421,11 @@ describe('real Redis checkout transactions across independent instances', () => 
   it('projects lower pricing read-only and persists the same version at claim', async () => {
     const a = await instance();
     const s = await create(a);
+
     await price(8000, 1900);
     const before = await redis.command('GET', a.store.sessionKey(s.session.id));
     const latest = value(await a.checkout.read(s.session.id));
+
     expect(latest.session).toMatchObject({
       status: 'ACTIVE',
       acceptedTotal: 19800,
@@ -379,7 +435,11 @@ describe('real Redis checkout transactions across independent instances', () => 
       before,
     );
     const done = value(await a.checkout.complete(request(latest)));
-    if (done.kind !== 'COMPLETED') throw new Error();
+
+    if (done.kind !== 'COMPLETED') {
+      throw new Error();
+    }
+
     expect(value(await a.checkout.confirm(done)).quote.total).toBe(19800);
   });
   it('three confirmed transient attempts exhaust across distinct server instances', async () => {
@@ -388,12 +448,14 @@ describe('real Redis checkout transactions across independent instances', () => 
     };
     let a = await instance({ payment });
     let s = await create(a);
+
     for (let n = 1; n <= 3; n++) {
       value(await a.checkout.complete(request(s, `try-${n}`)));
       a = await instance({ payment });
       s = value(await a.checkout.read(s.session.id));
       expect(s.session.paymentAttemptCount).toBe(n);
     }
+
     expect(s.session).toMatchObject({
       status: 'PAYMENT_FAILED',
       failureCode: 'ATTEMPTS_EXHAUSTED',
@@ -402,13 +464,18 @@ describe('real Redis checkout transactions across independent instances', () => 
     const metadata = JSON.parse(
       await redis.command('GET', a.store.sessionKey(s.session.id)),
     );
+
     expect(Object.keys(metadata.attempts)).toHaveLength(3);
     expect(Object.keys(metadata.ledger)).toHaveLength(3);
   });
   it('conserves GA capacity under competing partial-quantity claims and a sale', async () => {
     const a = await instance();
     const ga = listings.find((row) => row.id === 'music-ga')!;
-    if (ga.allocation.kind !== 'GENERAL_ADMISSION') throw new Error();
+
+    if (ga.allocation.kind !== 'GENERAL_ADMISSION') {
+      throw new Error();
+    }
+
     const selection = { ...ga.allocation, quantity: 5 };
     const results = await Promise.all(
       Array.from({ length: 12 }, () =>
@@ -419,12 +486,14 @@ describe('real Redis checkout transactions across independent instances', () => 
         }),
       ),
     );
+
     expect(results.filter((r) => r.ok)).toHaveLength(2);
     const tooMany = await a.checkout.create({
       listingId: ga.id,
       allocation: { ...ga.allocation, quantity: 3 },
       expectedListingVersion: version(1),
     });
+
     expect(code(tooMany)).toBe('INVENTORY_UNAVAILABLE');
     value(
       await a.checkout.create({
@@ -434,6 +503,7 @@ describe('real Redis checkout transactions across independent instances', () => 
       }),
     );
     const winner = results.find((r) => r.ok)!;
+
     value(await a.checkout.complete(request(value(winner))));
     expect(await conserved(a, ga.id)).toEqual({
       total: 12,
@@ -452,8 +522,10 @@ describe('real Redis checkout transactions across independent instances', () => 
     const b = await instance({
       payment: { attempt: async () => ({ kind: 'DECLINED' }) },
     });
+
     expect(value(await b.checkout.complete(input))).toEqual(first);
     const latest = value(await b.checkout.read(s.session.id));
+
     expect(latest.session.paymentAttemptCount).toBe(1);
     value(await b.checkout.complete(request(latest, 'decline')));
     expect(value(await b.checkout.read(s.session.id)).session).toMatchObject({
@@ -466,8 +538,10 @@ describe('real Redis checkout transactions across independent instances', () => 
   it('initialization preserves sold stock, holds and completed order/digest/attempt records', async () => {
     const a = await instance();
     const s = await create(a);
+
     value(await a.checkout.complete(request(s)));
     const before = await redis.command('GET', a.store.sessionKey(s.session.id));
+
     await Promise.all([instance(), instance(), instance()]);
     expect(await redis.command('GET', a.store.sessionKey(s.session.id))).toBe(
       before,
@@ -479,6 +553,7 @@ describe('real Redis checkout transactions across independent instances', () => 
       policy: { holdMs: 120, processingMs: 50, retentionAfterExpiryMs: 120 },
     });
     const s = await create(a);
+
     await redis.after(s.session.recoveryRetainUntil);
     expect(code(await a.checkout.read(s.session.id))).toBe('NOT_FOUND');
     expect(
@@ -498,12 +573,18 @@ describe('real Redis checkout transactions across independent instances', () => 
     const s = await create(a);
     const input = request(s);
     const completed = value(await a.checkout.complete(input));
+
     expect(completed.kind).toBe('COMPLETED');
     await redis.after(s.session.recoveryRetainUntil);
     const b = await instance();
+
     expect(code(await b.checkout.read(s.session.id))).toBe('NOT_FOUND');
     expect(value(await b.checkout.complete(input))).toEqual(completed);
-    if (completed.kind !== 'COMPLETED') throw new Error();
+
+    if (completed.kind !== 'COMPLETED') {
+      throw new Error();
+    }
+
     expect(value(await b.checkout.confirm(completed)).id).toBe(
       completed.orderId,
     );
@@ -524,11 +605,13 @@ describe('real Redis checkout transactions across independent instances', () => 
           delayed = true;
           await redis.after(s.session.reservationExpiresAt);
         }
+
         return redis.eval<T>(script, keys, args);
       },
     };
     const b = await instance({ executor });
     const result = await b.checkout.complete(request(s));
+
     expect(code(result)).toBe('RESERVATION_EXPIRED');
     expect((await conserved(a)).available).toBe(8);
   });
@@ -541,28 +624,38 @@ describe('real Redis checkout transactions across independent instances', () => 
         args: (string | number)[],
       ): Promise<T> => {
         const result = await redis.eval<T>(script, keys, args);
+
         if (script === COMMIT_LUA && drop) {
           const proposal = JSON.parse(String(args[0]));
+
           if (
             proposal.response?.value?.kind === 'COMPLETED' &&
             (result as { committed?: boolean }).committed
           ) {
             drop = false;
+
             throw new Error('response lost after commit');
           }
         }
+
         return result;
       },
     };
     const a = await instance({ executor });
     const s = await create(a);
     const input = request(s);
+
     drop = true;
     await expect(a.checkout.complete(input)).rejects.toThrow('response lost');
     const b = await instance();
     const replay = value(await b.checkout.complete(input));
+
     expect(replay.kind).toBe('COMPLETED');
-    if (replay.kind !== 'COMPLETED') throw new Error();
+
+    if (replay.kind !== 'COMPLETED') {
+      throw new Error();
+    }
+
     expect(value(await b.checkout.confirm(replay)).id).toBe(replay.orderId);
     expect((await conserved(b)).sold).toBe(2);
     expect(
@@ -582,6 +675,7 @@ describe('real Redis checkout transactions across independent instances', () => 
           delayCommit = false;
           await pause(100);
         }
+
         return redis.eval<T>(script, keys, args);
       },
     };
@@ -589,8 +683,10 @@ describe('real Redis checkout transactions across independent instances', () => 
       executor,
       policy: { ...DEFAULT_CHECKOUT_POLICY, holdMs: 200 },
     });
+
     delayCommit = true;
     const s = await create(a);
+
     expect(
       Date.parse(s.session.reservationExpiresAt) - Date.parse(s.serverNow),
     ).toBe(200);
@@ -617,19 +713,24 @@ describe('real Redis checkout transactions across independent instances', () => 
             observed();
             await gate;
           }
+
           const result = await redis.eval<T>(script, keys, args);
+
           commits.push({
             keys,
             committed: !!(result as { committed: boolean }).committed,
           });
+
           return result;
         }
+
         return redis.eval<T>(script, keys, args);
       },
     };
     const a = await instance({ executor });
     const b = await instance();
     const purchase = create(a);
+
     await started;
     const other = listings.find(
       (row) => row.eventId === listing.eventId && row.id !== listing.id,
@@ -643,6 +744,7 @@ describe('real Redis checkout transactions across independent instances', () => 
         : { ...other.allocation, quantity: 2 };
     const bSession = await create(b, other.id, selection);
     const done = value(await b.checkout.complete(request(bSession)));
+
     expect(done.kind).toBe('COMPLETED');
     unblock();
     await purchase;
@@ -672,16 +774,21 @@ describe('real Redis checkout transactions across independent instances', () => 
           race = true;
           await price(9000, 5000);
         }
+
         const result = await redis.eval<T>(script, keys, args);
+
         if (
           script === COMMIT_LUA &&
           !(result as { committed: boolean }).committed
-        )
+        ) {
           rejectedCAS = true;
+        }
+
         return result;
       },
     };
     const b = await instance({ executor });
+
     expect(code(await b.checkout.complete(request(s)))).toBe(
       'VERSION_CONFLICT',
     );
@@ -696,10 +803,12 @@ describe('real Redis checkout transactions across independent instances', () => 
     const s = await create(a);
     const key = a.store.sessionKey(s.session.id);
     const before = Number(await redis.command('PTTL', key));
+
     await pause(40);
     value(await a.checkout.read(s.session.id));
     await price(9000, 4000);
     const current = value(await a.checkout.read(s.session.id));
+
     value(
       await a.checkout.acceptQuote({
         sessionId: s.session.id,
@@ -718,6 +827,7 @@ describe('real Redis checkout transactions across independent instances', () => 
       replayRetentionMs: 100,
     });
     const s = await create(a);
+
     await redis.after(s.session.reservationExpiresAt);
     expect(
       Number(await redis.command('EXISTS', a.store.sessionKey(s.session.id))),
@@ -733,6 +843,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     const inventory = JSON.parse(
       await redis.command('GET', a.store.inventoryKey(listing.id)),
     );
+
     expect(Object.keys(inventory.reservations)).toHaveLength(0);
     expect(inventory.soldQuantity).toBe(0);
     expect((await create(await instance())).session.id).not.toBe(s.session.id);
@@ -745,13 +856,19 @@ describe('real Redis checkout transactions across independent instances', () => 
     const s = await create(a);
     const input = request(s);
     const done = value(await a.checkout.complete(input));
-    if (done.kind !== 'COMPLETED') throw new Error();
+
+    if (done.kind !== 'COMPLETED') {
+      throw new Error();
+    }
+
     const key = a.store.sessionKey(s.session.id);
+
     await redis.after(
       new Date(Date.parse(s.session.recoveryRetainUntil) + 110).toISOString(),
     );
     expect(await redis.command('EXISTS', key)).toBe('0');
     const b = await instance();
+
     expect(code(await b.checkout.read(s.session.id))).toBe('NOT_FOUND');
     expect(value(await b.checkout.complete(input))).toEqual(done);
     expect(
@@ -792,6 +909,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     const inventory = JSON.parse(
       await redis.command('GET', b.store.inventoryKey(listing.id)),
     );
+
     expect(Object.keys(inventory.reservations)).toHaveLength(0);
     expect(inventory.soldQuantity).toBe(2);
     expect(inventory.soldSeats).toEqual([9, 10]);
@@ -802,6 +920,7 @@ describe('real Redis checkout transactions across independent instances', () => 
       replayRetentionMs: 100,
     });
     const original = await create(a);
+
     await redis.after(original.session.reservationExpiresAt);
     const b = await instance({
       policy: { holdMs: 150, processingMs: 50, retentionAfterExpiryMs: 100 },
@@ -814,8 +933,13 @@ describe('real Redis checkout transactions across independent instances', () => 
         idempotencyKey: 'recover-first',
       }),
     );
-    if (first.kind !== 'REDIRECT_CHECKOUT') throw new Error();
+
+    if (first.kind !== 'REDIRECT_CHECKOUT') {
+      throw new Error();
+    }
+
     const successor = value(await b.checkout.read(first.sessionId));
+
     value(await b.checkout.complete(request(successor)));
     await redis.after(
       new Date(
@@ -832,6 +956,7 @@ describe('real Redis checkout transactions across independent instances', () => 
         idempotencyKey: 'recover-again',
       }),
     );
+
     expect(again).toEqual(first);
     expect((await conserved(a)).sold).toBe(2);
     expect(
@@ -842,15 +967,19 @@ describe('real Redis checkout transactions across independent instances', () => 
     const a = await instance({
       policy: { ...DEFAULT_CHECKOUT_POLICY, holdMs: 75 },
     });
+
     for (let n = 0; n < 8; n++) {
       const s = await create(a);
+
       await redis.after(s.session.reservationExpiresAt);
       expect((await conserved(a)).available).toBe(8);
       const inventory = JSON.parse(
         await redis.command('GET', a.store.inventoryKey(listing.id)),
       );
+
       expect(Object.keys(inventory.reservations)).toHaveLength(0);
     }
+
     expect(await redis.command('EXISTS', a.store.prefix + 'checkouts:v1')).toBe(
       '0',
     );
@@ -859,6 +988,7 @@ describe('real Redis checkout transactions across independent instances', () => 
     'fails closed when legacy %s data would create duplicate stock',
     async (legacy) => {
       const prefix = `checkout:{${namespace}}:`;
+
       await redis.command(
         'SET',
         prefix + legacy,

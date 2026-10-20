@@ -22,6 +22,7 @@ export function TicketSummary({
     allocation.kind === 'ASSIGNED'
       ? allocation.seats.length
       : allocation.quantity;
+
   return (
     <>
       <div className="summary-photo">
@@ -61,6 +62,7 @@ export function TicketSummary({
     </>
   );
 }
+
 export function PriceBreakdown({
   quote,
   quantity,

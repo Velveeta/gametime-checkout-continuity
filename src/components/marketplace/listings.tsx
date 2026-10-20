@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -28,6 +29,7 @@ export interface ListingRow {
   listing: Listing;
   availability: ListingAvailability;
 }
+
 function ListingCard({
   row,
   refresh,
@@ -72,6 +74,7 @@ function ListingCard({
       : choices.length
         ? 'Available'
         : 'No matching tickets';
+
   return (
     <article className="listing-card" aria-label={listing.allocation.section}>
       <div className="listing-top">
@@ -174,6 +177,7 @@ function ListingCard({
     </article>
   );
 }
+
 export function Listings({
   eventId,
   initial,
@@ -192,6 +196,7 @@ export function Listings({
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
+
   return (
     <section aria-labelledby="tickets-heading" className="tickets-list">
       <div className="section-heading">

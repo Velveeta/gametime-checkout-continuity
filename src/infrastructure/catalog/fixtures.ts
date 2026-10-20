@@ -20,9 +20,11 @@ function assigned(
     ],
   };
 }
+
 function ga(section: string, quantity: number): SeatAllocation {
   return { kind: 'GENERAL_ADMISSION', section, quantity };
 }
+
 function listing(
   id: string,
   eventId: string,
@@ -44,11 +46,16 @@ function listing(
     quantityRules: { min, max, increment },
   };
 }
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object') {
-    for (const child of Object.values(value)) deepFreeze(child);
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+
     Object.freeze(value);
   }
+
   return value;
 }
 

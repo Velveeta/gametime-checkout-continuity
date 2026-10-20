@@ -6,11 +6,13 @@ import {
   listing,
   NOW,
 } from '../../../tests/support/checkout-fixtures';
+
 const quote = createCheckout(
   { id: 'session', reservationId: 'hold', listing, allocation },
   NOW,
   DEFAULT_CHECKOUT_POLICY,
 ).session.quote;
+
 it.each([
   ['SUCCESS', 1, 'SUCCEEDED'],
   ['TRANSIENT_THEN_SUCCESS', 1, 'TRANSIENT_FAILURE'],
@@ -32,6 +34,7 @@ it.each([
       attemptNumber,
       quote,
     };
+
     expect((await payment.attempt(input)).kind).toBe(kind);
     expect(await payment.attempt(input)).toEqual(await payment.attempt(input));
   },

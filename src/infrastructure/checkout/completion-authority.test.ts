@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { HmacCompletionAuthority } from './completion-authority';
+
 it('derives stable unguessable caller/key-scoped capabilities and stores only a digest', () => {
   const authority = new HmacCompletionAuthority('x'.repeat(32));
   const binding = {
@@ -9,6 +10,7 @@ it('derives stable unguessable caller/key-scoped capabilities and stores only a 
     idempotencyKey: 'request',
   };
   const token = authority.issue(binding);
+
   expect(token).toEqual(authority.issue(binding));
   expect(token.capability).toHaveLength(43);
   expect(token.digest).toBe(

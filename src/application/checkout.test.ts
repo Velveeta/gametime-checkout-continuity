@@ -15,12 +15,18 @@ import { allocation, NOW } from '../../tests/support/checkout-fixtures';
 
 function success<T>(result: Result<T>): T {
   expect(result.ok).toBe(true);
-  if (!result.ok) throw result.error;
+
+  if (!result.ok) {
+    throw result.error;
+  }
+
   return result.value;
 }
+
 function errorCode<T>(result: Result<T>) {
   return result.ok ? undefined : result.error.code;
 }
+
 function setup(payment?: Payment) {
   let now = NOW;
   let sequence = 0;
@@ -49,6 +55,7 @@ function setup(payment?: Payment) {
         callerId,
         idempotencyKey,
       ]) as CompletionCapability;
+
       return { capability, digest: testDigest(capability) };
     },
   };
@@ -68,6 +75,7 @@ function setup(payment?: Payment) {
     completion,
   };
   const app = new CheckoutApplication(deps);
+
   return {
     app,
     deps,
@@ -88,11 +96,14 @@ function setup(payment?: Payment) {
     },
   };
 }
+
 // Node crypto belongs to tests/support, never to application production imports.
 import { createHash } from 'node:crypto';
+
 function testDigest(token: string) {
   return createHash('sha256').update(token).digest('hex');
 }
+
 function request(
   snapshot: CheckoutSnapshot,
   key = 'purchase',
@@ -106,6 +117,7 @@ function request(
     callerId,
   };
 }
+
 function deferredPayment() {
   let release!: () => void;
   let entered!: () => void;
@@ -118,18 +130,23 @@ function deferredPayment() {
   const attempt = vi.fn(async () => {
     entered();
     await gate;
+
     return { kind: 'SUCCEEDED' as const, reference: 'simulated' };
   });
+
   return { payment: { attempt }, started, release };
 }
+
 async function conserved(model: CheckoutModel) {
   const view = await model.getAvailability('listing');
+
   expect(view.counts.available + view.counts.held + view.counts.sold).toBe(
     view.counts.total,
   );
   expect(Object.values(view.counts).every((quantity) => quantity >= 0)).toBe(
     true,
   );
+
   return view.counts;
 }
 
@@ -137,6 +154,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('creates atomically at server time, ignoring a skewed application clock', async () => {
     const test = setup();
     const created = await test.create();
+
     expect(created.serverNow).toBe(NOW);
     expect(created.session.reservationExpiresAt).toBe(after(NOW, 600_000));
     expect(test.analytics[0]).toMatchObject({
@@ -170,9 +188,11 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
       reservationId: 'client-hold',
     };
     const view = success(await test.app.create(input));
+
     expect(view.session.id).not.toBe(input.sessionId);
     expect(view.session.reservationId).not.toBe(input.reservationId);
     const completionInput = { ...request(view), kind: 'RESERVE' };
+
     expect(success(await test.app.complete(completionInput)).kind).toBe(
       'COMPLETED',
     );
@@ -182,6 +202,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const created = await test.create();
     const stored = structuredClone(test.model.sessions.get(created.session.id));
     const commands = test.model.commands.length;
+
     test.setNow(created.session.reservationExpiresAt);
     expect(
       success(await test.app.getSession(created.session.id)).session.status,
@@ -197,6 +218,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const test = setup();
     let view = await test.create();
     const original = view;
+
     test.model.listing = {
       ...test.model.listing,
       unitPrice: cents(9000),
@@ -240,6 +262,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('blocks acceptance and completion if persisted live quote changed without a refresh', async () => {
     const test = setup();
     const view = await test.create();
+
     test.model.listing = {
       ...test.model.listing,
       feePerTicket: cents(3000),
@@ -262,6 +285,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('automatically applies decreases and emits positive analytics without changing deadlines', async () => {
     const test = setup();
     const old = await test.create();
+
     test.model.listing = {
       ...test.model.listing,
       unitPrice: cents(8000),
@@ -273,6 +297,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         expectedVersion: old.session.version,
       }),
     );
+
     expect(view.session.status).toBe('ACTIVE');
     expect(view.session.quote.total).toBe(19800);
     expect(view.session.reservationExpiresAt).toBe(
@@ -290,12 +315,14 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const view = await test.create();
     const original = request(view);
     const initiating = test.app.complete(original);
+
     await pending.started;
     const competitors = await Promise.all(
       Array.from({ length: 12 }, (_, n) =>
         test.app.complete(request(view, `competing-${n}`, `other-${n}`)),
       ),
     );
+
     expect(
       competitors.every(
         (result) => result.ok && result.value.kind === 'IN_PROGRESS',
@@ -305,6 +332,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     expect(pending.payment.attempt).toHaveBeenCalledTimes(1);
     pending.release();
     const complete = success(await initiating);
+
     expect(complete.kind).toBe('COMPLETED');
     expect(success(await test.app.complete(original))).toEqual(complete);
     expect(
@@ -335,7 +363,11 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const test = setup();
     const view = await test.create();
     const result = success(await test.app.complete(request(view)));
-    if (result.kind !== 'COMPLETED') throw new Error();
+
+    if (result.kind !== 'COMPLETED') {
+      throw new Error();
+    }
+
     expect(success(await test.app.confirm(result)).id).toBe(result.orderId);
     expect(success(await test.app.confirm(result)).id).toBe(result.orderId);
     expect(
@@ -370,15 +402,18 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const test = setup(payment);
     let view = await test.create();
     const expiry = view.session.reservationExpiresAt;
+
     for (let n = 1; n <= 3; n++) {
       const input = request(view, `try-${n}`);
       const result = success(await test.app.complete(input));
+
       expect(result.kind).toBe('UPDATED');
       expect(success(await test.app.complete(input))).toEqual(result);
       view = success(await test.app.read(view.session.id));
       expect(view.session.paymentAttemptCount).toBe(n);
       expect(view.session.reservationExpiresAt).toBe(expiry);
     }
+
     expect(view.session).toMatchObject({
       status: 'PAYMENT_FAILED',
       failureCode: 'ATTEMPTS_EXHAUSTED',
@@ -404,6 +439,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     };
     const test = setup(payment);
     let view = await test.create();
+
     success(await test.app.complete(request(view, 'first')));
     view = success(await test.app.read(view.session.id));
     expect(view.session.status).toBe('PAYMENT_RETRYABLE');
@@ -419,8 +455,10 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     };
     const test = setup(payment);
     const view = await test.create();
+
     success(await test.app.complete(request(view)));
     const declined = success(await test.app.read(view.session.id));
+
     expect(declined.session).toMatchObject({
       status: 'PAYMENT_FAILED',
       failureCode: 'DECLINED',
@@ -437,12 +475,16 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     async (mode) => {
       const payment: Payment = {
         attempt: vi.fn(async () => {
-          if (mode === 'THROWS') throw new Error('transport lost');
+          if (mode === 'THROWS') {
+            throw new Error('transport lost');
+          }
+
           return { kind: 'UNKNOWN' as const };
         }),
       };
       const test = setup(payment);
       const view = await test.create();
+
       expect(success(await test.app.complete(request(view))).kind).toBe(
         'IN_PROGRESS',
       );
@@ -450,7 +492,11 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         success(await test.app.complete(request(view, 'other'))).kind,
       ).toBe('IN_PROGRESS');
       const processing = success(await test.app.read(view.session.id)).session;
-      if (processing.status !== 'PROCESSING') throw new Error();
+
+      if (processing.status !== 'PROCESSING') {
+        throw new Error();
+      }
+
       test.setNow(processing.processingDeadlineAt);
       expect(success(await test.app.read(view.session.id)).session.status).toBe(
         'PAYMENT_FAILED',
@@ -466,8 +512,10 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const pending = deferredPayment();
     const test = setup(pending.payment);
     const view = await test.create();
+
     test.setNow(after(view.session.reservationExpiresAt, -1));
     const purchase = test.app.complete(request(view));
+
     await pending.started;
     test.setNow(view.session.reservationExpiresAt);
     expect(success(await test.app.read(view.session.id)).session.status).toBe(
@@ -490,6 +538,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('expiry-before-claim cannot start payment; a timed-out late success cannot sell', async () => {
     const test = setup();
     const view = await test.create();
+
     test.setNow(view.session.reservationExpiresAt);
     expect(errorCode(await test.app.complete(request(view)))).toBe(
       'RESERVATION_EXPIRED',
@@ -500,14 +549,21 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const second = setup(pending.payment);
     const next = await second.create();
     const purchase = second.app.complete(request(next));
+
     await pending.started;
     const processing = success(await second.app.read(next.session.id)).session;
-    if (processing.status !== 'PROCESSING') throw new Error();
+
+    if (processing.status !== 'PROCESSING') {
+      throw new Error();
+    }
+
     second.setNow(processing.processingDeadlineAt);
     success(await second.app.reconcile(next.session.id));
     const replacement = await second.create();
+
     pending.release();
     const result = success(await purchase);
+
     expect(result.kind).toBe('UPDATED');
     expect(second.model.orders.size).toBe(0);
     expect((await conserved(second.model)).held).toBe(2);
@@ -516,6 +572,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('mounted expiry goes to event without recovery; concurrent fresh recovery creates one successor', async () => {
     const test = setup();
     const view = await test.create();
+
     test.setNow(view.session.reservationExpiresAt);
     const mounted = success(
       await test.app.enter({
@@ -524,6 +581,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         recoveryIdempotencyKey: 'unused',
       }),
     );
+
     expect(mounted).toEqual({ kind: 'REDIRECT_EVENT', eventId: 'event' });
     expect(test.model.sessions.size).toBe(1);
     test.model.listing = {
@@ -542,12 +600,18 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     );
     const targets = recoveries.map((result) => {
       const entry = success(result);
-      if (entry.kind !== 'REDIRECT_CHECKOUT') throw new Error();
+
+      if (entry.kind !== 'REDIRECT_CHECKOUT') {
+        throw new Error();
+      }
+
       return entry.sessionId;
     });
+
     expect(new Set(targets).size).toBe(1);
     expect(test.model.sessions.size).toBe(2);
     const recovered = success(await test.app.read(targets[0]!)).session;
+
     expect(recovered).toMatchObject({
       status: 'ACTIVE',
       paymentAttemptCount: 0,
@@ -561,6 +625,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('unavailable recovery falls back to event, missing event/metadata to home', async () => {
     const test = setup();
     const view = await test.create();
+
     test.setNow(view.session.reservationExpiresAt);
     await test.create(); // another shopper takes the seats
     expect(
@@ -607,6 +672,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
       attempt: async () => ({ kind: 'TRANSIENT_FAILURE' }),
     });
     let view = await test.create();
+
     success(await test.app.complete(request(view)));
     view = success(await test.app.read(view.session.id));
     test.model.listing = {
@@ -629,7 +695,11 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         idempotencyKey: 'fresh',
       }),
     );
-    if (entry.kind !== 'REDIRECT_CHECKOUT') throw new Error();
+
+    if (entry.kind !== 'REDIRECT_CHECKOUT') {
+      throw new Error();
+    }
+
     expect(success(await test.app.read(entry.sessionId)).session).toMatchObject(
       { status: 'ACTIVE', paymentAttemptCount: 0, acknowledgedQuoteVersion: 2 },
     );
@@ -647,6 +717,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         expectedListingVersion: version(1),
       }),
     );
+
     expect(success(await app.complete(request(view))).kind).toBe('COMPLETED');
     const failing = new CheckoutApplication({
       ...test.deps,
@@ -656,6 +727,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         },
       },
     });
+
     expect(success(await failing.complete(request(view))).kind).toBe(
       'COMPLETED',
     );
@@ -664,6 +736,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
     const test = setup({
       attempt: async () => ({ kind: 'TRANSIENT_FAILURE' }),
     });
+
     test.model.listing = {
       ...test.model.listing,
       allocation: { kind: 'GENERAL_ADMISSION', section: 'GA', quantity: 4 },
@@ -675,6 +748,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         expectedListingVersion: version(1),
       }),
     );
+
     success(await test.app.complete(request(view)));
     expect((await conserved(test.model)).held).toBe(2);
     test.setNow(view.session.reservationExpiresAt);
@@ -685,6 +759,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
         idempotencyKey: 'ga-recovery',
       }),
     );
+
     expect(entry.kind).toBe('REDIRECT_CHECKOUT');
     expect(await conserved(test.model)).toEqual({
       total: 4,
@@ -696,6 +771,7 @@ describe('checkout orchestration against TEST-ONLY atomic-port reference', () =>
   it('rejects missing idempotency/caller identity before claiming', async () => {
     const test = setup();
     const view = await test.create();
+
     expect(
       errorCode(await test.app.complete({ ...request(view), callerId: '' })),
     ).toBe('IDEMPOTENCY_CONFLICT');

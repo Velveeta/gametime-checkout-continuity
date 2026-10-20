@@ -11,15 +11,21 @@ let client: ReturnType<typeof upstashRedis>;
 const touchedKeys = new Set<string>();
 let a: Awaited<ReturnType<typeof composeCheckout>>;
 let b: Awaited<ReturnType<typeof composeCheckout>>;
+
 beforeAll(async () => {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token)
+
+  if (!url || !token) {
     throw new Error(
       'Live Upstash validation requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN. No hosted guarantees were verified.',
     );
-  if (new URL(url).protocol !== 'https:')
+  }
+
+  if (new URL(url).protocol !== 'https:') {
     throw new Error('Use the HTTPS Upstash REST endpoint');
+  }
+
   client = upstashRedis({ url, token });
   const executor: RedisScriptExecutor = {
     eval: async <T>(
@@ -27,7 +33,10 @@ beforeAll(async () => {
       keys: string[],
       args: (string | number)[],
     ): Promise<T> => {
-      for (const key of keys) touchedKeys.add(key);
+      for (const key of keys) {
+        touchedKeys.add(key);
+      }
+
       return (await client.eval(script, keys, args)) as T;
     },
   };
@@ -39,21 +48,35 @@ beforeAll(async () => {
     secureCookies: true,
     analytics: { record: async () => {} },
   };
+
   a = await composeCheckout(options);
   b = await composeCheckout(options);
 });
 afterAll(async () => {
-  if (!client) return;
+  if (!client) {
+    return;
+  }
+
   const keys = [...touchedKeys];
-  if (!keys.length) return;
-  if (keys.some((key) => !key.startsWith(`checkout:{${namespace}}:`)))
+
+  if (!keys.length) {
+    return;
+  }
+
+  if (keys.some((key) => !key.startsWith(`checkout:{${namespace}}:`))) {
     throw new Error('Refusing cleanup outside isolated live-test namespace');
+  }
+
   // Delete exactly this generated test namespace, never scan or flush shared data.
   await client.eval("return redis.call('DEL',unpack(KEYS))", keys, []);
 });
 it('verifies real hosted SDK/EVAL transport, competing claims, cross-instance completion and replay', async () => {
   const listing = listings[0]!;
-  if (listing.allocation.kind !== 'ASSIGNED') throw new Error();
+
+  if (listing.allocation.kind !== 'ASSIGNED') {
+    throw new Error();
+  }
+
   const input = {
     listingId: listing.id,
     allocation: { ...listing.allocation, seats: [9, 10] as [number, number] },
@@ -64,9 +87,14 @@ it('verifies real hosted SDK/EVAL transport, competing claims, cross-instance co
     b.checkout.create(input),
     a.checkout.create(input),
   ]);
+
   expect(reservations.filter((r) => r.ok)).toHaveLength(1);
   const winner = reservations.find((r) => r.ok);
-  if (!winner) throw new Error('No reservation winner');
+
+  if (!winner) {
+    throw new Error('No reservation winner');
+  }
+
   const snapshot = winner.value;
   const complete = {
     sessionId: snapshot.session.id,
@@ -84,9 +112,13 @@ it('verifies real hosted SDK/EVAL transport, competing claims, cross-instance co
     }),
   ]);
   const done = outcomes.find((r) => r.ok && r.value.kind === 'COMPLETED');
+
   expect(done).toBeDefined();
-  if (!done?.ok || done.value.kind !== 'COMPLETED')
+
+  if (!done?.ok || done.value.kind !== 'COMPLETED') {
     throw new Error('No completed caller');
+  }
+
   const winningInput =
     outcomes[0]?.ok && outcomes[0].value.kind === 'COMPLETED'
       ? complete
@@ -95,8 +127,10 @@ it('verifies real hosted SDK/EVAL transport, competing claims, cross-instance co
           idempotencyKey: 'competing-key',
           callerId: 'other-device',
         };
+
   expect(await b.checkout.complete(winningInput)).toEqual(done);
   const confirmation = await a.checkout.confirm(done.value);
+
   expect(confirmation.ok).toBe(true);
   expect((await b.store.getAvailability(listing.id)).counts).toEqual({
     total: 8,

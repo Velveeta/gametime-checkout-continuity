@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
@@ -20,6 +21,7 @@ import { Countdown } from './countdown';
 import { ShareCheckout } from './share-checkout';
 import { useCheckout } from './use-checkout';
 import { money } from '@/lib/ui/presentation';
+
 export function CheckoutExperience({
   initial,
   summary,
@@ -42,12 +44,15 @@ export function CheckoutExperience({
     total: initial.session.quote.total,
     saved: 0,
   });
-  if (session.quote.version !== priceNotice.version)
+
+  if (session.quote.version !== priceNotice.version) {
     setPriceNotice({
       version: session.quote.version,
       total: session.quote.total,
       saved: Math.max(0, priceNotice.total - session.quote.total),
     });
+  }
+
   const quantity =
     session.allocation.kind === 'ASSIGNED'
       ? session.allocation.seats.length
@@ -63,6 +68,7 @@ export function CheckoutExperience({
     !failed &&
     !needsReview &&
     session.status !== 'EXPIRED';
+
   return (
     <div className="page-width checkout-page">
       <Link href={`/events/${session.eventId}`} className="back-link">

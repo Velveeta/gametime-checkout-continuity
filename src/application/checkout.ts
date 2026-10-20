@@ -42,15 +42,18 @@ export interface CheckoutDependencies {
   readonly completion: CompletionAuthority;
   readonly policy?: CheckoutPolicy;
 }
+
 function ok<T>(value: T): Result<T> {
   return { ok: true, value };
 }
+
 function failure<T>(
   code: ConstructorParameters<typeof DomainError>[0],
   message: string,
 ): Result<T> {
   return { ok: false, error: new DomainError(code, message) };
 }
+
 function snapshot(mutation: {
   session: CheckoutSession;
   serverNow: CheckoutSnapshot['serverNow'];
@@ -73,6 +76,7 @@ export class CheckoutApplication implements CheckoutService {
       command,
       this.policy,
     );
+
     if (result.ok) {
       // Delivery failures never turn a successful purchase into a failure/retry.
       void Promise.allSettled(
@@ -87,22 +91,31 @@ export class CheckoutApplication implements CheckoutService {
         ),
       );
     }
+
     return result;
   }
   async create(
     input: Parameters<CheckoutService['create']>[0],
   ): Promise<Result<CheckoutSnapshot>> {
     const listing = await this.dependencies.catalog.getListing(input.listingId);
-    if (!listing) return failure('NOT_FOUND', 'Listing not found');
+
+    if (!listing) {
+      return failure('NOT_FOUND', 'Listing not found');
+    }
+
     try {
       validateSelection(listing, {
         kind: 'EXACT',
         allocation: input.allocation,
       });
     } catch (error) {
-      if (error instanceof DomainError) return { ok: false, error };
+      if (error instanceof DomainError) {
+        return { ok: false, error };
+      }
+
       throw error;
     }
+
     // An availability preflight would race. Atomic RESERVE rechecks all facts.
     const result = await this.execute({
       kind: 'RESERVE',
@@ -112,16 +125,20 @@ export class CheckoutApplication implements CheckoutService {
       allocation: input.allocation,
       expectedListingVersion: input.expectedListingVersion,
     });
+
     return result.ok ? ok(snapshot(result.value)) : result;
   }
   async getSession(sessionId: string): Promise<Result<CheckoutSnapshot>> {
     const value = await this.dependencies.repository.read(sessionId);
+
     if (
       !value ||
       Date.parse(value.serverNow) >=
         Date.parse(value.session.recoveryRetainUntil)
-    )
+    ) {
       return failure('NOT_FOUND', 'Checkout metadata not found');
+    }
+
     return ok({
       session: reconcileCheckout(value.session, value.serverNow).session,
       serverNow: value.serverNow,
@@ -132,6 +149,7 @@ export class CheckoutApplication implements CheckoutService {
   }
   async reconcile(sessionId: string): Promise<Result<CheckoutSnapshot>> {
     const result = await this.execute({ kind: 'EXPIRE_IF_DUE', sessionId });
+
     return result.ok ? ok(snapshot(result.value)) : result;
   }
   private async fallback(eventId: string): Promise<CheckoutEntry> {
@@ -143,17 +161,27 @@ export class CheckoutApplication implements CheckoutService {
     input: Parameters<CheckoutService['enter']>[0],
   ): Promise<Result<CheckoutEntry>> {
     const result = await this.getSession(input.sessionId);
-    if (!result.ok)
+
+    if (!result.ok) {
       return result.error.code === 'NOT_FOUND'
         ? ok({ kind: 'REDIRECT_HOME' })
         : result;
+    }
+
     const session = result.value.session;
-    if (session.status === 'COMPLETED' || session.status === 'PAYMENT_FAILED')
+
+    if (session.status === 'COMPLETED' || session.status === 'PAYMENT_FAILED') {
       return ok({ kind: 'REDIRECT_HOME' });
-    if (session.status !== 'EXPIRED')
+    }
+
+    if (session.status !== 'EXPIRED') {
       return ok({ kind: 'RENDER', snapshot: result.value });
-    if (input.intent === 'MOUNTED_REFRESH')
+    }
+
+    if (input.intent === 'MOUNTED_REFRESH') {
       return ok(await this.fallback(session.eventId));
+    }
+
     return this.recoverExpiredSession({
       sessionId: input.sessionId,
       intent: 'FRESH_NAVIGATION',
@@ -164,15 +192,22 @@ export class CheckoutApplication implements CheckoutService {
     input: Parameters<CheckoutService['recoverExpiredSession']>[0],
   ): Promise<Result<CheckoutEntry>> {
     // Runtime check as well as the literal type: an HTTP adapter must map navigation intent explicitly.
-    if (input.intent !== 'FRESH_NAVIGATION')
+    if (input.intent !== 'FRESH_NAVIGATION') {
       return failure('INVALID_SELECTION', 'Recovery requires fresh navigation');
+    }
+
     const current = await this.getSession(input.sessionId);
-    if (!current.ok)
+
+    if (!current.ok) {
       return current.error.code === 'NOT_FOUND'
         ? ok({ kind: 'REDIRECT_HOME' })
         : current;
-    if (current.value.session.status !== 'EXPIRED')
+    }
+
+    if (current.value.session.status !== 'EXPIRED') {
       return ok({ kind: 'REDIRECT_HOME' });
+    }
+
     const result = await this.execute({
       kind: 'RECOVER',
       expiredSessionId: input.sessionId,
@@ -180,12 +215,18 @@ export class CheckoutApplication implements CheckoutService {
       reservationId: this.dependencies.ids.next('reservation'),
       idempotencyKey: input.idempotencyKey,
     });
-    if (result.ok)
+
+    if (result.ok) {
       return ok({
         kind: 'REDIRECT_CHECKOUT',
         sessionId: result.value.session.id,
       });
-    if (result.error.code === 'NOT_FOUND') return ok({ kind: 'REDIRECT_HOME' });
+    }
+
+    if (result.error.code === 'NOT_FOUND') {
+      return ok({ kind: 'REDIRECT_HOME' });
+    }
+
     if (
       [
         'INVENTORY_UNAVAILABLE',
@@ -193,8 +234,10 @@ export class CheckoutApplication implements CheckoutService {
         'TERMINAL_SESSION',
         'RESERVATION_EXPIRED',
       ].includes(result.error.code)
-    )
+    ) {
       return ok(await this.fallback(current.value.session.eventId));
+    }
+
     return result;
   }
   async refreshQuote(
@@ -205,6 +248,7 @@ export class CheckoutApplication implements CheckoutService {
       sessionId: input.sessionId,
       expectedVersion: input.expectedVersion,
     });
+
     return result.ok ? ok(snapshot(result.value)) : result;
   }
   async acceptQuote(
@@ -216,6 +260,7 @@ export class CheckoutApplication implements CheckoutService {
       expectedVersion: input.expectedVersion,
       quoteVersion: input.quoteVersion,
     });
+
     return result.ok ? ok(snapshot(result.value)) : result;
   }
   private completionResult(
@@ -229,6 +274,7 @@ export class CheckoutApplication implements CheckoutService {
         capability: this.dependencies.completion.issue(input).capability,
       });
     }
+
     return ok({
       kind:
         mutation.session.status === 'PROCESSING' ? 'IN_PROGRESS' : 'UPDATED',
@@ -243,11 +289,13 @@ export class CheckoutApplication implements CheckoutService {
       !input.idempotencyKey.trim() ||
       input.callerId.length > 128 ||
       input.idempotencyKey.length > 128
-    )
+    ) {
       return failure(
         'IDEMPOTENCY_CONFLICT',
         'Caller binding and idempotency key are required',
       );
+    }
+
     const claim = await this.execute({
       kind: 'CLAIM_COMPLETION',
       sessionId: input.sessionId,
@@ -257,12 +305,19 @@ export class CheckoutApplication implements CheckoutService {
       idempotencyKey: input.idempotencyKey,
       attemptId: this.dependencies.ids.next('attempt'),
     });
-    if (!claim.ok) return claim;
-    if (claim.value.kind !== 'CLAIMED')
+
+    if (!claim.ok) {
+      return claim;
+    }
+
+    if (claim.value.kind !== 'CLAIMED') {
       return this.completionResult(claim.value, input);
+    }
+
     const processing = claim.value.session;
     const credentials = this.dependencies.completion.issue(input);
     let outcome: PaymentOutcome;
+
     try {
       outcome = await this.dependencies.payment.attempt({
         sessionId: processing.id,
@@ -273,6 +328,7 @@ export class CheckoutApplication implements CheckoutService {
     } catch {
       outcome = { kind: 'UNKNOWN' };
     }
+
     const settled = await this.execute({
       kind: 'SETTLE_PAYMENT',
       sessionId: processing.id,
@@ -283,6 +339,7 @@ export class CheckoutApplication implements CheckoutService {
       orderId: this.dependencies.ids.next('order'),
       capabilityDigest: credentials.digest,
     });
+
     return settled.ok ? this.completionResult(settled.value, input) : settled;
   }
   confirm(input: { orderId: string; capability: CompletionCapability }) {
