@@ -23,12 +23,12 @@ All keys use the namespace Redis hash tag and are explicit Lua KEYS. Sharing a
 hash slot permits atomic multi-key publication; it does **not** make unrelated
 keys part of a transaction's conflict checks.
 
-| Key | Contents and retention |
-| --- | --- |
-| `checkout:{namespace}:inventory:v2:listingId` | One listing, live holds, inventory revision, bounded sold-seat/count summary; durable |
-| `checkout:{namespace}:session:v2:sessionId` | One checkout, at most three payment attempts and three replay entries; absolute metadata TTL |
-| `checkout:{namespace}:completed:v2:sessionId` | One permanent order-uniqueness fence plus the original caller/key-bound completion receipt |
-| `checkout:{namespace}:order:v2:orderId` | One durable order and capability digest |
+| Key                                           | Contents and retention                                                                       |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `checkout:{namespace}:inventory:v2:listingId` | One listing, live holds, inventory revision, bounded sold-seat/count summary; durable        |
+| `checkout:{namespace}:session:v2:sessionId`   | One checkout, at most three payment attempts and three replay entries; absolute metadata TTL |
+| `checkout:{namespace}:completed:v2:sessionId` | One permanent order-uniqueness fence plus the original caller/key-bound completion receipt   |
+| `checkout:{namespace}:order:v2:orderId`       | One durable order and capability digest                                                      |
 
 There is no namespace-wide checkout index or growing per-event reservation history.
 Confirmation reads fetch only their order. Historical orders/receipts are separate
@@ -132,22 +132,27 @@ Authorization and nosniff. Success envelope: `{ok:true,data:...}`. Failure:
 invalid IDs/versions. JSON mutations require application/json, reject cross-origin
 browser requests and enforce a 16 KiB body limit.
 
-| Route | Contract |
-| --- | --- |
-| GET `/api/events` | Events and explicit simulation notice |
-| GET `/api/events/:id` | One event, or 404 |
-| GET `/api/events/:id/listings` | Stable fixture ordering; current listing prices and live availability/counts/server time |
-| POST `/api/checkouts` | `{eventId,listingId,allocation,expectedListingVersion}`; allocation is assigned section/row/seats or GA section/quantity; 201 on reservation |
-| GET `/api/checkouts/:id` | Read-only snapshot and serverNow; retained EXPIRED state returns 410 with snapshot in data; missing metadata 404; never recovers |
-| POST `/api/checkouts/:id/acknowledge-price` | `{expectedVersion,quoteVersion}`; exact live quote and CAS required |
-| POST `/api/checkouts/:id/complete` | Same version body plus Idempotency-Key header and signed caller cookie; 202 in progress, 200 operation result |
-| POST `/api/checkouts/:id/recover` | `{intent:"FRESH_NAVIGATION"}` plus Idempotency-Key; one successor or event/root navigation instruction |
-| GET `/api/orders/:id/confirmation` | Per-order confirmation cookie or Authorization: Bearer capability; no token in URL |
+| Route                                       | Contract                                                                                                                                     |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET `/api/events`                           | Events and explicit simulation notice                                                                                                        |
+| GET `/api/events/:id`                       | One event, or 404                                                                                                                            |
+| GET `/api/events/:id/listings`              | Stable fixture ordering; current listing prices and live availability/counts/server time                                                     |
+| POST `/api/checkouts`                       | `{eventId,listingId,allocation,expectedListingVersion}`; allocation is assigned section/row/seats or GA section/quantity; 201 on reservation |
+| GET `/api/checkouts/:id`                    | Read-only snapshot and serverNow; retained EXPIRED state returns 410 with snapshot in data; missing metadata 404; never recovers             |
+| POST `/api/checkouts/:id/acknowledge-price` | `{expectedVersion,quoteVersion}`; exact live quote and CAS required                                                                          |
+| POST `/api/checkouts/:id/complete`          | Same version body plus Idempotency-Key header and signed caller cookie; 202 in progress, 200 operation result                                |
+| POST `/api/checkouts/:id/recover`           | `{intent:"FRESH_NAVIGATION"}` plus Idempotency-Key; one successor or event/root navigation instruction                                       |
+| GET `/api/orders/:id/confirmation`          | Per-order confirmation cookie or Authorization: Bearer capability; no token in URL                                                           |
 
 Assigned allocation example:
 
 ```json
-{"kind":"ASSIGNED","section":"443 · Upper Reserved","row":"18","seats":[9,10]}
+{
+  "kind": "ASSIGNED",
+  "section": "443 · Upper Reserved",
+  "row": "18",
+  "seats": [9, 10]
+}
 ```
 
 Conflict/price/CAS/idempotency/terminal mutations return 409; expired holds return
@@ -205,9 +210,10 @@ API returns 503; static homepage/build remains usable without live credentials.
 
 `npm run check` runs lint, types, unit tests, real local Redis integration tests,
 production build, then a built-HTTP test. Local tests require redis-server/redis-cli
->=6.2 plus openssl on PATH (or REDIS_SERVER/REDIS_CLI absolute binary paths).
-On macOS: `brew install redis openssl`. No local service needs to be started.
-The harness starts temporary loopback Redis with persistence disabled and stops it.
+
+> =6.2 plus openssl on PATH (or REDIS_SERVER/REDIS_CLI absolute binary paths).
+> On macOS: `brew install redis openssl`. No local service needs to be started.
+> The harness starts temporary loopback Redis with persistence disabled and stops it.
 
 The built-HTTP test starts two Next instances and uses the actual Upstash SDK over
 TLS through a **test-only REST protocol bridge backed by real Redis**. It verifies

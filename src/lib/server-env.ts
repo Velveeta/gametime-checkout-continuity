@@ -1,5 +1,5 @@
-import "server-only";
-import { parseServerEnv, requireRedisEnv } from "./env";
+import 'server-only';
+import { parseServerEnv, requireRedisEnv } from './env';
 
 export function readServerEnv() {
   return parseServerEnv(process.env);

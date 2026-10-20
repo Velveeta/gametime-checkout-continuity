@@ -3,6 +3,7 @@
 A phased implementation contract for a fictional ticket marketplace built for the GameTime assessment. **All events, dates, listings, prices and purchases are simulated.**
 
 ## Start here
+
 1. Read `AGENTS.md` (global guardrails, intentionally short).
 2. Execute **only** the assigned `specs/NN-*.md` wave.
 3. Read `handoffs/NN-previous.md` if one exists; do not ingest the full specs directory.
@@ -12,9 +13,11 @@ A phased implementation contract for a fictional ticket marketplace built for th
 Recommended order: 00 foundation → 01 catalog/inventory → 02 checkout lifecycle → 03 API/persistence → 04 UI → 05 developer controls → 06 tests/deployment. If interface dependencies require a small change to a previous wave, document it in the handoff.
 
 ## Non-negotiable product demonstration
+
 Choose an event and a real-looking seat listing; reserve it; observe inventory disappear in another independent shopping session; open the same checkout URL on a second device; change price in either direction; synchronize the hold timer; simulate payment failure/retry; complete once even with competing devices; observe completion navigation; expire a live page (redirect to event); separately navigate to an already-expired link (attempt fresh reservation, otherwise event/root fallback).
 
 ## Delivery target
+
 Public Vercel URL, GitHub repo, environment setup, demo walkthrough, and README explaining architecture, tradeoffs, tests and limitations. No actual ticket inventory, real payments, credentials or GameTime branding impersonation.
 
 ## Foundation setup (Wave 00)
@@ -87,7 +90,6 @@ Toolchain note: ESLint 9 is retained to satisfy the Next configuration's React,
 import and accessibility plugin peer ranges. npm reports its deprecation; revisit
 the coordinated lint stack upgrade when those plugins support ESLint 10.
 
-
 ## Wave 01 — catalog and exclusive inventory
 
 Four explicitly fictional 2027 events and 16 immutable listings live in
@@ -131,7 +133,6 @@ through the Next ESLint development dependencies. Do not force-downgrade the Nex
 lint configuration. Track the upstream fix; `npm audit --omit=dev` distinguishes
 the production dependency audit, and does not mean dev dependencies are fixed.
 
-
 ## Wave 02 — checkout domain and application services
 
 `src/domain/checkout.ts` implements fixed-deadline state transitions, complete-total
@@ -159,7 +160,6 @@ was added. The app still renders its foundation page.
 Run `npm test` for unit/domain/application/model tests, `npm run test:integration`
 for standalone real-Redis inventory tests, or `npm run check` for both plus lint,
 strict types and production build. Local Redis binary prerequisites are unchanged.
-
 
 ## Wave 03 — persisted checkout and HTTP API
 

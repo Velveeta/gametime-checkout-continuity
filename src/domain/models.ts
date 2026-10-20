@@ -1,4 +1,4 @@
-import type { Cents, Currency, Instant, Version } from "./values";
+import type { Cents, Currency, Instant, Version } from './values';
 
 export type EventId = string;
 export type ListingId = string;
@@ -16,10 +16,18 @@ export interface Event {
 }
 
 export type SeatAllocation =
-  | { readonly kind: "ASSIGNED"; readonly section: string; readonly row: string;
+  | {
+      readonly kind: 'ASSIGNED';
+      readonly section: string;
+      readonly row: string;
       /** Ascending, unique, contiguous seat numbers, validated at service boundary. */
-      readonly seats: readonly [number, ...number[]] }
-  | { readonly kind: "GENERAL_ADMISSION"; readonly section: string; readonly quantity: number };
+      readonly seats: readonly [number, ...number[]];
+    }
+  | {
+      readonly kind: 'GENERAL_ADMISSION';
+      readonly section: string;
+      readonly quantity: number;
+    };
 
 export interface Listing {
   readonly id: ListingId;
@@ -28,7 +36,11 @@ export interface Listing {
   readonly unitPrice: Cents;
   /** Explicit synthetic per-ticket fee; quote fees scale with selected quantity. */
   readonly feePerTicket: Cents;
-  readonly quantityRules: { readonly min: number; readonly max: number; readonly increment: number };
+  readonly quantityRules: {
+    readonly min: number;
+    readonly max: number;
+    readonly increment: number;
+  };
   readonly currency: Currency;
   readonly version: Version;
 }
@@ -58,14 +70,15 @@ export interface SessionBase {
   readonly createdAt: Instant;
 }
 
-type IdleSession = SessionBase & ({ readonly status: "ACTIVE" } | { readonly status: "PRICE_REVIEW" }) & {
-  readonly paymentAttemptCount: 0 | 1 | 2;
-  readonly processingDeadlineAt?: never;
-  readonly orderId?: never;
-};
+type IdleSession = SessionBase &
+  ({ readonly status: 'ACTIVE' } | { readonly status: 'PRICE_REVIEW' }) & {
+    readonly paymentAttemptCount: 0 | 1 | 2;
+    readonly processingDeadlineAt?: never;
+    readonly orderId?: never;
+  };
 
 type ProcessingSession = SessionBase & {
-  readonly status: "PROCESSING";
+  readonly status: 'PROCESSING';
   readonly attemptId: AttemptId;
   readonly paymentAttemptCount: 1 | 2 | 3;
   readonly processingDeadlineAt: Instant;
@@ -73,36 +86,43 @@ type ProcessingSession = SessionBase & {
 };
 
 type RetryableSession = SessionBase & {
-  readonly status: "PAYMENT_RETRYABLE";
+  readonly status: 'PAYMENT_RETRYABLE';
   readonly paymentAttemptCount: 1 | 2;
-  readonly failureCode: "TRANSIENT";
+  readonly failureCode: 'TRANSIENT';
   readonly processingDeadlineAt?: never;
   readonly orderId?: never;
 };
 
 type FailedSession = SessionBase & {
-  readonly status: "PAYMENT_FAILED";
+  readonly status: 'PAYMENT_FAILED';
   readonly paymentAttemptCount: 1 | 2 | 3;
-  readonly failureCode: "DECLINED" | "ATTEMPTS_EXHAUSTED" | "PROCESSING_TIMEOUT";
+  readonly failureCode:
+    'DECLINED' | 'ATTEMPTS_EXHAUSTED' | 'PROCESSING_TIMEOUT';
   readonly processingDeadlineAt?: never;
   readonly orderId?: never;
 };
 
 type CompletedSession = SessionBase & {
-  readonly status: "COMPLETED";
+  readonly status: 'COMPLETED';
   readonly paymentAttemptCount: 1 | 2 | 3;
   readonly orderId: OrderId;
   readonly processingDeadlineAt?: never;
 };
 
 type ExpiredSession = SessionBase & {
-  readonly status: "EXPIRED";
+  readonly status: 'EXPIRED';
   readonly successorSessionId?: SessionId;
   readonly processingDeadlineAt?: never;
   readonly orderId?: never;
 };
 
-export type CheckoutSession = IdleSession | ProcessingSession | RetryableSession | FailedSession | CompletedSession | ExpiredSession;
+export type CheckoutSession =
+  | IdleSession
+  | ProcessingSession
+  | RetryableSession
+  | FailedSession
+  | CompletedSession
+  | ExpiredSession;
 
 export interface Order {
   readonly id: OrderId;
@@ -115,4 +135,6 @@ export interface Order {
 }
 
 /** Opaque bearer token, never included in session snapshots, URLs, or analytics. */
-export type CompletionCapability = string & { readonly __brand: "CompletionCapability" };
+export type CompletionCapability = string & {
+  readonly __brand: 'CompletionCapability';
+};

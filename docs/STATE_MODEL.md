@@ -24,19 +24,19 @@ Type assertions or persisted JSON cannot replace that validation.
 
 ## Transitions
 
-| From | Trigger and atomic preconditions | To / inventory effect |
-| --- | --- | --- |
-| No session | Current listing/version, valid selection, availability | ACTIVE; reserve selected inventory and create session together |
-| ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Higher current quote while live | PRICE_REVIEW; invalidate previous acceptance |
-| ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Lower current quote while live | Auto-apply lower quote and show positive message; remain PRICE_REVIEW if still above acceptedTotal, otherwise ACTIVE/PAYMENT_RETRYABLE |
-| PRICE_REVIEW | Accept exact current quote version and session CAS while live | ACTIVE or PAYMENT_RETRYABLE according to prior attempts; acknowledge exact version |
-| ACTIVE, PAYMENT_RETRYABLE | Current owned reservation, now < business deadline, current quote accepted if increased, attempts < 3 | PROCESSING; increment attempt once, create attempt ID and separate processing deadline |
-| PROCESSING | Successful result for matching claimed attempt before processing deadline | COMPLETED; create one order and sell inventory atomically |
-| PROCESSING | Confirmed transient failure, attempts < 3, business reservation still live | PAYMENT_RETRYABLE; remove processing protection, retain original reservation deadline |
-| PROCESSING | Confirmed transient failure after business deadline, attempts < 3 | EXPIRED; release inventory |
-| PROCESSING | Decline, third transient failure, or processing timeout | PAYMENT_FAILED; release inventory |
-| ACTIVE, PRICE_REVIEW, PAYMENT_RETRYABLE | now >= reservationExpiresAt | EXPIRED; release inventory |
-| EXPIRED | Fresh-navigation recovery with retained metadata and current availability | Create ONE new ACTIVE session/reservation and link recovery atomically; original remains EXPIRED |
+| From                                    | Trigger and atomic preconditions                                                                      | To / inventory effect                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| No session                              | Current listing/version, valid selection, availability                                                | ACTIVE; reserve selected inventory and create session together                                                                         |
+| ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Higher current quote while live                                                                       | PRICE_REVIEW; invalidate previous acceptance                                                                                           |
+| ACTIVE, PAYMENT_RETRYABLE, PRICE_REVIEW | Lower current quote while live                                                                        | Auto-apply lower quote and show positive message; remain PRICE_REVIEW if still above acceptedTotal, otherwise ACTIVE/PAYMENT_RETRYABLE |
+| PRICE_REVIEW                            | Accept exact current quote version and session CAS while live                                         | ACTIVE or PAYMENT_RETRYABLE according to prior attempts; acknowledge exact version                                                     |
+| ACTIVE, PAYMENT_RETRYABLE               | Current owned reservation, now < business deadline, current quote accepted if increased, attempts < 3 | PROCESSING; increment attempt once, create attempt ID and separate processing deadline                                                 |
+| PROCESSING                              | Successful result for matching claimed attempt before processing deadline                             | COMPLETED; create one order and sell inventory atomically                                                                              |
+| PROCESSING                              | Confirmed transient failure, attempts < 3, business reservation still live                            | PAYMENT_RETRYABLE; remove processing protection, retain original reservation deadline                                                  |
+| PROCESSING                              | Confirmed transient failure after business deadline, attempts < 3                                     | EXPIRED; release inventory                                                                                                             |
+| PROCESSING                              | Decline, third transient failure, or processing timeout                                               | PAYMENT_FAILED; release inventory                                                                                                      |
+| ACTIVE, PRICE_REVIEW, PAYMENT_RETRYABLE | now >= reservationExpiresAt                                                                           | EXPIRED; release inventory                                                                                                             |
+| EXPIRED                                 | Fresh-navigation recovery with retained metadata and current availability                             | Create ONE new ACTIVE session/reservation and link recovery atomically; original remains EXPIRED                                       |
 
 Equal quote totals with a changed version also invalidate stale completion CAS;
 if the session still has an unaccepted increase, it stays PRICE_REVIEW. Price

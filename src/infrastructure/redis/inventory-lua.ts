@@ -161,7 +161,9 @@ local function inventoryCommitSale(state,request,now)
 end
 `;
 
-export const INVENTORY_LUA = INVENTORY_LUA_CORE + String.raw`
+export const INVENTORY_LUA =
+  INVENTORY_LUA_CORE +
+  String.raw`
 local request=cjson.decode(ARGV[1])
 local time=redis.call('TIME')
 local now=tonumber(time[1])*1000+math.floor(tonumber(time[2])/1000)

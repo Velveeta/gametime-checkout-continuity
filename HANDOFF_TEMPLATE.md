@@ -1,4 +1,5 @@
 # Wave NN handoff (max 350 words)
+
 - **Commit:** SHA or 'not committed'
 - **Delivered:** 2–5 bullets, paths only where useful
 - **Contracts added/changed:** concise signatures or links to exact files

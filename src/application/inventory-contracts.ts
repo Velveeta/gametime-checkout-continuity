@@ -1,8 +1,14 @@
-import type { Result } from "../domain/errors";
-import type { InventorySelection } from "../domain/inventory";
-import type { ListingId, OrderId, ReservationId, SeatAllocation, SessionId } from "../domain/models";
-import type { Instant, Version } from "../domain/values";
-import type { Inventory } from "./ports";
+import type { Result } from '../domain/errors';
+import type { InventorySelection } from '../domain/inventory';
+import type {
+  ListingId,
+  OrderId,
+  ReservationId,
+  SeatAllocation,
+  SessionId,
+} from '../domain/models';
+import type { Instant, Version } from '../domain/values';
+import type { Inventory } from './ports';
 
 export type InventoryReservation = {
   readonly id: ReservationId;
@@ -12,9 +18,9 @@ export type InventoryReservation = {
   readonly createdAt: Instant;
   readonly expiresAt: Instant;
 } & (
-  | { readonly status: "HELD" }
-  | { readonly status: "EXPIRED" }
-  | { readonly status: "SOLD"; readonly orderId: OrderId }
+  | { readonly status: 'HELD' }
+  | { readonly status: 'EXPIRED' }
+  | { readonly status: 'SOLD'; readonly orderId: OrderId }
 );
 
 export interface ListingAvailability {
@@ -22,7 +28,12 @@ export interface ListingAvailability {
   /** Inventory revision, independent of the catalog/quote version. */
   readonly version: Version;
   readonly serverNow: Instant;
-  readonly counts: { readonly total: number; readonly available: number; readonly held: number; readonly sold: number };
+  readonly counts: {
+    readonly total: number;
+    readonly available: number;
+    readonly held: number;
+    readonly sold: number;
+  };
   /** Only returned to a trusted application caller for this checkout owner. */
   readonly ownReservations: readonly InventoryReservation[];
 }
@@ -40,11 +51,18 @@ export interface ReserveInventory {
  * sale + order creation within the same Lua execution, not call them in sequence.
  */
 export interface ReservationRepository extends Inventory {
-  getAvailability(listingId: ListingId, ownerSessionId?: SessionId): Promise<ListingAvailability>;
+  getAvailability(
+    listingId: ListingId,
+    ownerSessionId?: SessionId,
+  ): Promise<ListingAvailability>;
   reserve(input: ReserveInventory): Promise<Result<InventoryReservation>>;
   /** Inventory sale primitive only. No order is created here. */
-  commitSale(input: { readonly listingId: ListingId; readonly reservationId: ReservationId;
-    readonly sessionId: SessionId; readonly orderId: OrderId }): Promise<Result<InventoryReservation>>;
+  commitSale(input: {
+    readonly listingId: ListingId;
+    readonly reservationId: ReservationId;
+    readonly sessionId: SessionId;
+    readonly orderId: OrderId;
+  }): Promise<Result<InventoryReservation>>;
   /** Non-destructive, SET-NX-equivalent fixture initialization. */
   initialize(): Promise<void>;
 }
@@ -55,6 +73,8 @@ export interface ReservationRepository extends Inventory {
  * Never expose this interface directly to a browser.
  */
 export interface DemoInventoryReset {
-  reset(input: { readonly demoSecret: string; readonly confirmation: "RESET_SIMULATED_INVENTORY" }):
-    Promise<Result<{ readonly resetAt: Instant }>>;
+  reset(input: {
+    readonly demoSecret: string;
+    readonly confirmation: 'RESET_SIMULATED_INVENTORY';
+  }): Promise<Result<{ readonly resetAt: Instant }>>;
 }
