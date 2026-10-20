@@ -167,8 +167,13 @@ strict types and production build. Local Redis binary prerequisites are unchange
 attempt/replay and order persistence using a Redis snapshot + conditional Lua
 commit. The commit validates every read key and deadline boundary, starts fresh
 deadlines from Redis commit time, and publishes all affected records with one
-MSET. Existing event keys are preserved; checkout metadata uses one same-slot
-namespace index. Prototype aggregate size/contention limits are documented.
+MSET. The hardened v2 layout uses individual checkout/order/receipt records and
+listing-level stock, so unrelated listings do not conflict or read historical
+purchases. Temporary coordination records have a fixed TTL; successful orders and
+completion fences remain durable. Released holds are pruned and sold occupancy is
+compacted. See `docs/PERSISTENCE_API.md` for the proof, retention and remaining limits.
+V1 namespaces fail closed: use a new isolated namespace for this storage upgrade;
+no automatic migration or destructive reset is included.
 
 Nine JSON Route Handlers validate inputs with Zod and call the application
 services. `/checkout/[id]` is a dynamic SSR routing boundary with minimal initial

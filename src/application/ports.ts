@@ -97,7 +97,9 @@ export interface CheckoutRepository {
    * Persist session + inventory effects + order + capability digest + replay ledger
    * atomically. Reconciliation/fencing must commit even if a later guard rejects.
    * Claim checks live quote, CAS, hold ownership and unique checkout-order index.
-   * Same session/key/caller + same request returns stable result; changed request
+   * Within retained replay metadata, same session/key/caller + same request
+   * returns a stable result; successful completion receipts remain durable.
+   * Collected unsuccessful requests must fail without restarting payment. Changed request
    * or caller conflicts. Different keys cannot claim a processing/completed session.
    * Store only token digests. Replay grants return solely to the original binding.
    * Recovery links ONE successor per original, regardless of request keys/devices.

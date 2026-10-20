@@ -17,69 +17,100 @@ requests to framework-independent application/domain services. The SSR checkout
 page invokes services directly. Its minimal server HTML is only a Wave 04 seam;
 responsive checkout interactions and event/confirmation pages are still pending.
 
-## Key layout and optimistic transaction proof
+## Key layout and scoped optimistic transactions
 
-All keys use the same namespace Redis hash tag, and all accessed keys are explicit
-Lua KEYS:
+All keys use the namespace Redis hash tag and are explicit Lua KEYS. Sharing a
+hash slot permits atomic multi-key publication; it does **not** make unrelated
+keys part of a transaction's conflict checks.
 
-| Key | Contents |
+| Key | Contents and retention |
 | --- | --- |
-| `checkout:{namespace}:inventory:eventId` | Existing Wave 01 schema v1: definitions, exact/GA reservations, inventory revision, sold stock |
-| `checkout:{namespace}:checkouts:v1` | Schema v1 index: sessions, orders, unique order-by-session map, attempts/fences, replay ledger, capability digests |
+| `checkout:{namespace}:inventory:v2:listingId` | One listing, live holds, inventory revision, bounded sold-seat/count summary; durable |
+| `checkout:{namespace}:session:v2:sessionId` | One checkout, at most three payment attempts and three replay entries; absolute metadata TTL |
+| `checkout:{namespace}:completed:v2:sessionId` | One permanent order-uniqueness fence plus the original caller/key-bound completion receipt |
+| `checkout:{namespace}:order:v2:orderId` | One durable order and capability digest |
 
-Session/order timestamps use epoch milliseconds internally; APIs hydrate canonical
-UTC ISO strings. The index deliberately groups related metadata into one key so
-sessions, orders, replay grants and fences share the same commit. Existing event
-inventory keys retain their schema. No automatic destructive migration or reset
-is exposed; unknown/corrupt schemas fail closed.
+There is no namespace-wide checkout index or growing per-event reservation history.
+Confirmation reads fetch only their order. Historical orders/receipts are separate
+records and are never scanned by new purchases. Catalog seeding performs bounded
+fixture work, preserves existing v2 data and has no checkout-wide CAS dependency.
+Session/order timestamps are epoch milliseconds internally and UTC ISO externally.
 
-The implementation is an optimistic transaction, not an unguarded read/update:
+The transaction protocol remains optimistic, with authoritative TypeScript rules:
 
-1. `SNAPSHOT_LUA` reads the full checkout index and every catalog event inventory
-   document together with Redis TIME. Even pure reads use EVAL, not EVAL_RO.
-2. TypeScript applies the existing domain functions to a private candidate, checking
-   current quotes, session CAS, reservation membership/ownership, availability,
-   attempts, order uniqueness and caller/key replay identity. It jointly reconciles
-   due processing sessions and stock before selecting available seats.
-3. `COMMIT_LUA` compares the exact bytes of EVERY read key with that snapshot and
-   checks that Redis TIME has not crossed the earliest relevant business,
-   processing or metadata-retention boundary (or moved backwards). Any mismatch
-   retries the entire decision from a fresh snapshot, up to 64 attempts.
-4. New reservation/protection timestamps are started from commit-time Redis TIME,
-   not application planning time. All values and the response are serialized
-   before the only write: one MSET atomically publishes index plus inventories.
-   Failed validation performs no partial write. Expiry/quote reconciliation may
-   commit even when a later business guard returns a structured rejection.
+1. Discover the target checkout's listing/recovery successor, then use
+   `SNAPSHOT_LUA` to reread the complete relevant key set plus Redis TIME atomically.
+   Ordinary EVAL routes these reads to the primary. Missing keys are dependencies
+   too. Expired hold owners join the set so fencing and release commit together;
+   unrelated live checkouts and other listings do not join it.
+2. Apply pure domain decisions to a private working set: current price and
+   acknowledgement, session version, ownership, fixed deadlines, attempt limits,
+   one order per session and caller/key binding. Reconcile due holds first.
+3. `COMMIT_LUA` compares every read key's original bytes and validates that Redis
+   TIME has not crossed a relevant deadline or moved backwards. A conflict retries
+   the whole decision, up to 64 times. No separate unguarded writes or local locks.
+4. Start newly authorized holds/processing windows from commit-time Redis TIME.
+   Validate/serialize all changed values and the response before MSET; publish
+   only changed records together. Assign temporary records their absolute
+   PEXPIREAT metadata deadline in the same script. Guard rejections can still
+   persist due expiration/quote reconciliation.
 
-This gives a serializable conditional publish over this read set, including
-reservation, claim/protection, completion/order/sale/digest/ledger, and one linked
-recovery successor. It reuses the tested TypeScript rules rather than maintaining
-a second checkout state machine in Lua. New holds start at successful commit;
-ordinary reads/replays never extend them. Different idempotency keys cannot
-produce different orders for one checkout. A lost settlement response can be
-retried by the same caller/key and rederive the original confirmation capability.
-A process crash or lost claim response before payment starts may leave PROCESSING
-until its deadline; the attempt then fails safely. There is no background payment
-job or real-gateway reconciliation in this prototype.
+Transactions sharing a listing deliberately coordinate over that listing's stock;
+transactions on different listings, including the same event, do not invalidate
+one another. Recovery atomically reads/writes original and successor session keys;
+settlement publishes sale, order, permanent completion fence and replay together.
+Permanent fences reject new completion keys and internal session-ID reuse even
+after temporary records are gone. The original caller/key can recover its stable
+successful response/capability without recreating a checkout or selling twice.
 
-Redis key expiry/notifications are not business authority. Sessions become
-logically unavailable at recoveryRetainUntil; holds become logically free at their
-business deadline unless processing protection applies. Processing timeout fences
-the attempt and releases its hold in the same publish; late settlement cannot
-sell reacquired stock. Orders/sold units remain durable. No TTL or pruning is
-currently applied to these aggregate keys: old metadata/fences remain physically
-retained, while API access observes the configured retention boundary. This favors
-correct replay fencing in a small prototype; growing history, whole-document
-transfers, namespace-wide contention and bounded retries limit scale.
+### Retention and inventory lifecycle
 
-Production composition uses the joint store for inventory reads. The legacy
-standalone inventory adapter/factory remains for compatibility/tests; do not use
-its sale primitive as checkout completion. Any future writer must participate in
-this consistency boundary, including developer price/deadline/reset operations.
+Business reservation deadlines and processing deadlines remain authoritative.
+Inventory never has a TTL. Before another shopper reserves, due processing
+attempts are fenced and holds released atomically, even if no worker ran and all
+metadata keys still exist. Late settlement cannot sell a newly acquired hold.
+Sold holds are immediately folded into a quantity/seat occupancy summary; released
+and expired holds are removed. Inventory size depends on listing capacity/current
+holds, not the number of past visitors or purchases.
 
-Upstash documents primary routing for ordinary EVAL (distinct from EVAL_RO); this
-is why authoritative snapshots are scripts rather than replica GETs. Provider
-failover/disk durability and hosted limits have not been exercised locally.
+Read/recovery access ends at `recoveryRetainUntil` (normally 30 minutes after the
+original 10-minute hold). Temporary session/attempt/replay records are physically
+collected at `max(recoveryRetainUntil, processingDeadlineAt) + 24 hours`. Neither
+polling, acknowledgements nor replay extends this absolute deadline. The extra
+window supports unsuccessful-operation retries; after collection those retries
+return NOT_FOUND and can never initiate payment. A successful purchase instead
+keeps one permanent completion receipt and order, so its authorized replay and
+confirmation remain durable. These small per-purchase records grow with sales,
+but do not increase the work of unrelated transactions. Real financial/legal
+retention or archival is outside this simulated prototype.
+
+If a process crashes after claiming payment, protection lasts until the processing
+deadline and then fails safely. There is no background payment job or real gateway
+reconciliation worker. Redis transport retries may replay a committed operation;
+its caller/key and permanent receipt preserve idempotency.
+
+### Storage upgrade and remaining limits
+
+V2 is a storage-format change; HTTP and repository signatures are preserved.
+Initialization **refuses any legacy v1 index/event inventory** in the namespace,
+before writing anything. This prevents reseeding already-held or sold inventory.
+For an existing v1 demonstration, keep its namespace/data intact and choose a new
+isolated CHECKOUT_NAMESPACE for v2. No destructive reset or automatic migration is
+included. A real deployed database would require a reviewed offline migration;
+no hosted database was configured during this assessment.
+
+This is bounded prototype hardening, not an unlimited-throughput claim. One very
+popular listing can still contend, commits retry only 64 times, inventory summaries
+scale with seat capacity, and the namespace uses one Redis cluster slot. Cluster
+sharding, production load/failover testing and provider limits remain future work.
+
+Production uses the joint store. The Wave 01 standalone adapter retains its v1
+format for tests/compatibility; **do not mix it with v2 in one namespace** or use
+its sale primitive for checkout. Future price/deadline/reset writers must modify
+the relevant v2 records through the same consistency protocol.
+
+Upstash documents primary routing for ordinary EVAL (distinct from EVAL_RO).
+Provider failover/disk durability and hosted limits have not been exercised locally.
 References: https://redis.io/docs/latest/develop/programmability/eval-intro/ and
 https://upstash.com/blog/replicated-cache-backed-by-redis (primary reads section).
 
@@ -156,7 +187,7 @@ prefetching in Wave 04 so speculative rendering cannot request fresh recovery.
 Copy `.env.example` to `.env.local` and supply:
 
 - UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN: HTTPS REST endpoint and a
-  read/write token that supports EVAL and MSET. Do not use read-only credentials.
+  read/write token that supports EVAL, MSET and PEXPIREAT. Do not use read-only credentials.
 - CHECKOUT_NAMESPACE: stable across instances of one environment; isolate local,
   preview and production environments with different namespaces.
 - CHECKOUT_CALLER_SECRET and CHECKOUT_COMPLETION_SECRET: distinct, persistent,
@@ -184,7 +215,10 @@ Route Handler wiring, secure cookies, cross-instance completion/replay,
 confirmation, expired JSON and SSR redirects. This is not a hosted provider test.
 Real-Redis integration additionally exercises contention, expiry, recovery,
 repricing races, processing fences, a deliberately delayed commit, and lost
-successful-settlement responses. Disk-loss/failover is not simulated.
+successful-settlement responses. Hardening tests deliberately interleave unrelated
+same-event listings, force a conflicting price publish, expire actual metadata
+TTLs, and verify durable replay/sold stock afterward. Disk-loss/failover and
+production throughput are not simulated.
 
 No live Upstash credentials were available in this run. To complete hosted SDK /
 EVAL validation, export the credentials (without printing them), then run:
@@ -199,7 +233,7 @@ npm run test:upstash
 This opt-in suite fails when credentials are missing; it is excluded from default
 checks. It always generates its own `live-test-UUID` namespace, verifies SDK script
 transport, simultaneous reservations/completions, cross-instance replay and
-confirmation, then deletes only its five exact test keys. It ignores your regular
+confirmation, then deletes only the exact keys touched in that generated namespace. It ignores your regular
 CHECKOUT_NAMESPACE and never scans or flushes a database. A failed live suite must
 be investigated before claiming hosted compatibility. Run `npm run build` before
 `npm run test:http` when invoking the built-HTTP suite separately.

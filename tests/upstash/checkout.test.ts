@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { afterAll,beforeAll,expect,it } from "vitest";
 import { composeCheckout } from "../../src/infrastructure/checkout/compose";
 import { upstashRedis } from "../../src/infrastructure/redis/upstash";
-import { FixtureCatalog } from "../../src/infrastructure/catalog/catalog";
+import type { RedisScriptExecutor } from "../../src/infrastructure/redis/inventory";
 import { listings } from "../../src/infrastructure/catalog/fixtures";
 import { version } from "../../src/domain/values";
 
 const namespace=`live-test-${randomUUID()}`;
 let client:ReturnType<typeof upstashRedis>;
+const touchedKeys=new Set<string>();
 let a:Awaited<ReturnType<typeof composeCheckout>>;
 let b:Awaited<ReturnType<typeof composeCheckout>>;
 beforeAll(async()=>{
@@ -15,12 +16,18 @@ beforeAll(async()=>{
   if(!url||!token)throw new Error("Live Upstash validation requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN. No hosted guarantees were verified.");
   if(new URL(url).protocol!=="https:")throw new Error("Use the HTTPS Upstash REST endpoint");
   client=upstashRedis({url,token});
-  const options={redis:client,namespace,callerSecret:randomUUID()+randomUUID(),completionSecret:randomUUID()+randomUUID(),secureCookies:true,analytics:{record:async()=>{}}};
+  const executor:RedisScriptExecutor={eval:async<T>(script:string,keys:string[],args:(string|number)[]):Promise<T>=>{
+    for(const key of keys)touchedKeys.add(key);
+    return await client.eval(script,keys,args) as T;
+  }};
+  const options={redis:executor,namespace,callerSecret:randomUUID()+randomUUID(),completionSecret:randomUUID()+randomUUID(),secureCookies:true,analytics:{record:async()=>{}}};
   a=await composeCheckout(options);b=await composeCheckout(options);
 });
 afterAll(async()=>{
   if(!client)return;
-  const keys=[`checkout:{${namespace}}:checkouts:v1`,...(await new FixtureCatalog().listEvents()).map((event)=>`checkout:{${namespace}}:inventory:${event.id}`)];
+  const keys=[...touchedKeys];
+  if(!keys.length)return;
+  if(keys.some((key)=>!key.startsWith(`checkout:{${namespace}}:`)))throw new Error("Refusing cleanup outside isolated live-test namespace");
   // Delete exactly this generated test namespace, never scan or flush shared data.
   await client.eval("return redis.call('DEL',unpack(KEYS))",keys,[]);
 });

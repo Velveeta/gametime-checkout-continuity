@@ -50,7 +50,7 @@ describe("HTTP transport with production services and actual Redis",()=>{
     const a=await create();
     const duplicate=await runtime.api.create(request("/api/checkouts",{eventId:listing.eventId,listingId:listing.id,allocation:selected,expectedListingVersion:1}));
     expect(duplicate.status).toBe(409);expect((await duplicate.json()).error.code).toBe("INVENTORY_UNAVAILABLE");
-    const key=runtime.store.prefix+"checkouts:v1";const before=await redis.command("GET",key);
+    const key=runtime.store.sessionKey(a.id);const before=await redis.command("GET",key);
     for(let i=0;i<3;i++)expect((await runtime.api.read(request(`/api/checkouts/${a.id}`,undefined,{cookie:a.cookie}),a.id)).status).toBe(200);
     expect(await redis.command("GET",key)).toBe(before);
   });
@@ -86,10 +86,10 @@ describe("HTTP transport with production services and actual Redis",()=>{
     runtime=await composeCheckout({redis,namespace:`short-${randomUUID()}`,callerSecret:"caller-secret-".repeat(4),completionSecret:"completion-secret-".repeat(4),secureCookies:true,
       policy:{...DEFAULT_CHECKOUT_POLICY,holdMs:120},analytics:{record:async()=>{}}});
     const a=await create();await redis.after(a.snapshot.session.reservationExpiresAt);
-    const before=await redis.command("GET",runtime.store.prefix+"checkouts:v1");
+    const before=await redis.command("GET",runtime.store.sessionKey(a.id));
     const expired=await runtime.api.read(request(`/api/checkouts/${a.id}`),a.id);
     expect(expired.status).toBe(410);expect((await expired.json()).data.session.status).toBe("EXPIRED");
-    expect(await redis.command("GET",runtime.store.prefix+"checkouts:v1")).toBe(before);
+    expect(await redis.command("GET",runtime.store.sessionKey(a.id))).toBe(before);
     const path=`/api/checkouts/${a.id}/recover`;
     expect((await runtime.api.recover(request(path,{intent:"MOUNTED_REFRESH"},{key:"recovery"}),a.id)).status).toBe(400);
     const recovered=await runtime.api.recover(request(path,{intent:"FRESH_NAVIGATION"},{key:"recovery"}),a.id);

@@ -1,5 +1,9 @@
 # Wave 01 inventory contracts
 
+This describes the standalone Wave 01 adapter. Production checkout uses the
+hardened Wave 03 v2 layout in `PERSISTENCE_API.md`; do not mix their storage
+namespaces or compose the standalone sale operation with checkout completion.
+
 ## Data and selection
 
 `FixtureCatalog` implements catalog reads with four clearly simulated 2027 events

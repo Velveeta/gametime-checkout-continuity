@@ -33,22 +33,36 @@ export interface StoredHold {
   createdAtMs: number; expiresAtMs: number; processingDeadlineMs?: number; attemptId?: string; orderId?: string;
 }
 export interface InventoryDocument {
-  schemaVersion: 1; eventId: string; version: number;
+  schemaVersion: 2; eventId: string; version: number;
   listings: Record<string, Listing>; reservations: Record<string, StoredHold>;
+  soldQuantity: number; soldSeats: number[];
 }
 export interface AttemptRecord {
   sessionId: string; callerId: string; key: string; status: "PROCESSING" | "FENCED" | "SUCCEEDED" | "TRANSIENT_FAILURE" | "DECLINED";
   ordinal: number;
 }
 export interface LedgerEntry { callerId: string; fingerprint: string; attemptId: string; final?: CheckoutMutation }
-export interface CheckoutIndex {
-  schemaVersion: 1; revision: number; sessions: Record<string, CheckoutSession>;
+/** An ephemeral transaction working set, never a persisted namespace aggregate. */
+export interface CheckoutWorkingSet {
+  sessions: Record<string, CheckoutSession>;
   orders: Record<string, Order>; orderBySession: Record<string, string>; digests: Record<string, string>;
   attempts: Record<string, AttemptRecord>; ledger: Record<string, LedgerEntry>;
 }
-export function emptyIndex(): CheckoutIndex {
-  return { schemaVersion: 1, revision: 0, sessions: {}, orders: {}, orderBySession: {}, digests: {}, attempts: {}, ledger: {} };
+export function emptyWorkingSet(): CheckoutWorkingSet {
+  return { sessions: {}, orders: {}, orderBySession: {}, digests: {}, attempts: {}, ledger: {} };
 }
+export const REPLAY_RETENTION_MS = 24 * 60 * 60_000;
+/** At most three attempts/ledger entries; TTL never authorizes releasing stock. */
+export interface SessionDocument {
+  schemaVersion: 2; session: CheckoutSession;
+  attempts: Record<string, AttemptRecord>; ledger: Record<string, LedgerEntry>;
+}
+/** Permanent per-purchase fence and original authorized completion response. */
+export interface CompletionReceipt {
+  schemaVersion: 2; sessionId: string; listingId: string; orderId: string;
+  ledgerKey: string; entry: LedgerEntry;
+}
+export interface OrderDocument { schemaVersion: 2; order: Order; digest: string }
 const dateKeys = new Set(["createdAt", "reservationExpiresAt", "recoveryRetainUntil", "processingDeadlineAt", "serverNow"]);
 /** Internal wire uses milliseconds, allowing commit-time deadlines inside Lua. */
 export function wire(value: unknown, decode = false, key = ""): unknown {

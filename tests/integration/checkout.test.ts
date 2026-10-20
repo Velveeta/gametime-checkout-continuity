@@ -5,6 +5,7 @@ import { RedisHarness } from "./redis-harness";
 import { composeCheckout } from "../../src/infrastructure/checkout/compose";
 import type { CheckoutSnapshot, CompleteCheckoutInput } from "../../src/application/checkout-service";
 import type { Payment } from "../../src/application/ports";
+import type { SeatAllocation } from "../../src/domain/models";
 import type { Result } from "../../src/domain/errors";
 import { DEFAULT_CHECKOUT_POLICY, type CheckoutPolicy } from "../../src/domain/checkout";
 import { version } from "../../src/domain/values";
@@ -18,21 +19,21 @@ const allocation=listing.allocation.kind==="ASSIGNED"?{...listing.allocation,sea
 let namespace:string;
 const callerSecret="caller-test-secret-".repeat(3);
 const completionSecret="completion-test-secret-".repeat(3);
-async function instance(options:{payment?:Payment;policy?:CheckoutPolicy;executor?:RedisScriptExecutor}={}) {
+async function instance(options:{payment?:Payment;policy?:CheckoutPolicy;executor?:RedisScriptExecutor;replayRetentionMs?:number}={}) {
   return composeCheckout({redis:options.executor??redis,namespace,callerSecret,completionSecret,secureCookies:true,
     payment:options.payment??{attempt:async()=>({kind:"SUCCEEDED",reference:"simulated"})},
-    ...(options.policy?{policy:options.policy}:{}),analytics:{record:async()=>{}}});
+    ...(options.policy?{policy:options.policy}:{}),...(options.replayRetentionMs?{replayRetentionMs:options.replayRetentionMs}:{}),analytics:{record:async()=>{}}});
 }
 function value<T>(result:Result<T>):T {if(!result.ok)throw result.error;return result.value;}
 function code<T>(result:Result<T>) {return result.ok?undefined:result.error.code;}
-async function create(runtime:Awaited<ReturnType<typeof instance>>,listingId=listing.id,selection=allocation) {
+async function create(runtime:Awaited<ReturnType<typeof instance>>,listingId=listing.id,selection:SeatAllocation=allocation) {
   return value(await runtime.checkout.create({listingId,allocation:selection,expectedListingVersion:version(1)}));
 }
 function request(s:CheckoutSnapshot,key="payment",callerId="device-a"):CompleteCheckoutInput {
   return {sessionId:s.session.id,expectedVersion:s.session.version,quoteVersion:s.session.quote.version,idempotencyKey:key,callerId};
 }
 async function price(unitPrice:number,fees:number) {
-  await redis.command("EVAL",`local d=cjson.decode(redis.call('GET',KEYS[1]));local l=d.listings[ARGV[1]];l.unitPrice=tonumber(ARGV[2]);l.feePerTicket=tonumber(ARGV[3]);l.version=l.version+1;redis.call('SET',KEYS[1],cjson.encode(d));return 1`,"1",`checkout:{${namespace}}:inventory:${listing.eventId}`,listing.id,String(unitPrice),String(fees));
+  await redis.command("EVAL",`local d=cjson.decode(redis.call('GET',KEYS[1]));local l=d.listings[ARGV[1]];l.unitPrice=tonumber(ARGV[2]);l.feePerTicket=tonumber(ARGV[3]);l.version=l.version+1;redis.call('SET',KEYS[1],cjson.encode(d));return 1`,"1",`checkout:{${namespace}}:inventory:v2:${listing.id}`,listing.id,String(unitPrice),String(fees));
 }
 function pending() {
   let release!:()=>void;let entered!:()=>void;
@@ -59,10 +60,11 @@ describe("real Redis checkout transactions across independent instances",()=>{
   });
   it("GET-style reads leave Redis bytes/deadlines unchanged; expiry restores without TTL/worker",async()=>{
     const r=await instance({policy:{...DEFAULT_CHECKOUT_POLICY,holdMs:150}});const s=await create(r);
-    const key=r.store.prefix+"checkouts:v1";const before=await redis.command("GET",key);
+    const key=r.store.sessionKey(s.session.id);const before=await redis.command("GET",key);
     value(await r.checkout.getSession(s.session.id));
     expect(await redis.command("GET",key)).toBe(before);
-    expect(await redis.command("TTL",key)).toBe("-1");
+    expect(Number(await redis.command("PTTL",key))).toBeGreaterThan(24*60*60_000);
+    expect(await redis.command("TTL",r.store.inventoryKey(listing.id))).toBe("-1");
     await redis.after(s.session.reservationExpiresAt);
     expect(value(await r.checkout.getSession(s.session.id)).session.status).toBe("EXPIRED");
     expect(await redis.command("GET",key)).toBe(before);
@@ -84,8 +86,8 @@ describe("real Redis checkout transactions across independent instances",()=>{
     if(complete.kind!=="COMPLETED")throw new Error();
     expect(value(await c.checkout.confirm(complete)).id).toBe(complete.orderId);
     expect(await conserved(c)).toEqual({total:8,held:0,sold:2,available:6});
-    const data=JSON.parse(await redis.command("GET",c.store.prefix+"checkouts:v1"));
-    expect(Object.keys(data.orders)).toHaveLength(1);
+    const data=JSON.parse(await redis.command("GET",c.store.receiptKey(s.session.id)));
+    expect(data.orderId).toBe(complete.orderId);
     expect(JSON.stringify(data)).not.toContain(complete.capability);
   });
   it("keeps processing protected across business expiry and releases only after fenced timeout",async()=>{
@@ -139,9 +141,9 @@ describe("real Redis checkout transactions across independent instances",()=>{
   });
   it("projects lower pricing read-only and persists the same version at claim",async()=>{
     const a=await instance();const s=await create(a);await price(8000,1900);
-    const before=await redis.command("GET",a.store.prefix+"checkouts:v1");
+    const before=await redis.command("GET",a.store.sessionKey(s.session.id));
     const latest=value(await a.checkout.read(s.session.id));expect(latest.session).toMatchObject({status:"ACTIVE",acceptedTotal:19800,acknowledgedQuoteVersion:2});
-    expect(await redis.command("GET",a.store.prefix+"checkouts:v1")).toBe(before);
+    expect(await redis.command("GET",a.store.sessionKey(s.session.id))).toBe(before);
     const done=value(await a.checkout.complete(request(latest)));if(done.kind!=="COMPLETED")throw new Error();
     expect(value(await a.checkout.confirm(done)).quote.total).toBe(19800);
   });
@@ -151,6 +153,8 @@ describe("real Redis checkout transactions across independent instances",()=>{
       value(await a.checkout.complete(request(s,`try-${n}`)));a=await instance({payment});s=value(await a.checkout.read(s.session.id));expect(s.session.paymentAttemptCount).toBe(n);
     }
     expect(s.session).toMatchObject({status:"PAYMENT_FAILED",failureCode:"ATTEMPTS_EXHAUSTED"});expect((await conserved(a)).available).toBe(8);
+    const metadata=JSON.parse(await redis.command("GET",a.store.sessionKey(s.session.id)));
+    expect(Object.keys(metadata.attempts)).toHaveLength(3);expect(Object.keys(metadata.ledger)).toHaveLength(3);
   });
   it("conserves GA capacity under competing partial-quantity claims and a sale",async()=>{
     const a=await instance();const ga=listings.find((row)=>row.id==="music-ga")!;
@@ -177,8 +181,8 @@ describe("real Redis checkout transactions across independent instances",()=>{
   });
   it("initialization preserves sold stock, holds and completed order/digest/attempt records",async()=>{
     const a=await instance();const s=await create(a);value(await a.checkout.complete(request(s)));
-    const before=await redis.command("GET",a.store.prefix+"checkouts:v1");await Promise.all([instance(),instance(),instance()]);
-    expect(await redis.command("GET",a.store.prefix+"checkouts:v1")).toBe(before);expect((await conserved(a)).sold).toBe(2);
+    const before=await redis.command("GET",a.store.sessionKey(s.session.id));await Promise.all([instance(),instance(),instance()]);
+    expect(await redis.command("GET",a.store.sessionKey(s.session.id))).toBe(before);expect((await conserved(a)).sold).toBe(2);
   });
   it("metadata expires logically after retention while orders remain durable",async()=>{
     const a=await instance({policy:{holdMs:120,processingMs:50,retentionAfterExpiryMs:120}});const s=await create(a);
@@ -220,7 +224,7 @@ describe("real Redis checkout transactions across independent instances",()=>{
     if(replay.kind!=="COMPLETED")throw new Error();
     expect(value(await b.checkout.confirm(replay)).id).toBe(replay.orderId);
     expect((await conserved(b)).sold).toBe(2);
-    expect(Object.keys(JSON.parse(await redis.command("GET",b.store.prefix+"checkouts:v1")).orders)).toHaveLength(1);
+    expect(JSON.parse(await redis.command("GET",b.store.receiptKey(s.session.id))).orderId).toBe(replay.orderId);
   });
   it("commit starts new hold at commit time, not at a delayed snapshot/planning time",async()=>{
     let delayCommit=false;
@@ -233,4 +237,120 @@ describe("real Redis checkout transactions across independent instances",()=>{
     expect(Date.parse(s.session.reservationExpiresAt)-Date.parse(s.serverNow)).toBe(200);
     expect(s.session.createdAt).toBe(s.serverNow);
   });
+  it("commits unrelated listings in the same event without conflicting or reading their history",async()=>{
+    let unblock!:()=>void;let observed!:()=>void;
+    const gate=new Promise<void>((resolve)=>{unblock=resolve;});
+    const started=new Promise<void>((resolve)=>{observed=resolve;});
+    const commits:{keys:string[];committed:boolean}[]=[];
+    const executor:RedisScriptExecutor={eval:async<T>(script:string,keys:string[],args:(string|number)[]):Promise<T>=>{
+      if(script===COMMIT_LUA) {
+        if(commits.length===0){observed();await gate;}
+        const result=await redis.eval<T>(script,keys,args);
+        commits.push({keys,committed:!!(result as {committed:boolean}).committed});return result;
+      }
+      return redis.eval<T>(script,keys,args);
+    }};
+    const a=await instance({executor});const b=await instance();
+    const purchase=create(a);await started;
+    const other=listings.find((row)=>row.eventId===listing.eventId&&row.id!==listing.id)!;
+    const selection:SeatAllocation=other.allocation.kind==="ASSIGNED"
+      ? {...other.allocation,seats:other.allocation.seats.slice(0,2) as [number,...number[]]} : {...other.allocation,quantity:2};
+    const bSession=await create(b,other.id,selection);
+    const done=value(await b.checkout.complete(request(bSession)));
+    expect(done.kind).toBe("COMPLETED");
+    unblock();await purchase;
+    expect(commits).toHaveLength(1);expect(commits[0]!.committed).toBe(true);
+    expect(commits[0]!.keys).not.toContain(b.store.inventoryKey(other.id));
+    expect(commits[0]!.keys).not.toContain(b.store.sessionKey(bSession.session.id));
+    expect(commits[0]!.keys).not.toContain(b.store.receiptKey(bSession.session.id));
+    expect(commits[0]!.keys).toHaveLength(3); // one inventory, checkout and absent completion receipt
+  });
+  it("retries a conflicting listing price publish before rejecting stale completion",async()=>{
+    const a=await instance();const s=await create(a);let race=false;let rejectedCAS=false;
+    const executor:RedisScriptExecutor={eval:async<T>(script:string,keys:string[],args:(string|number)[]):Promise<T>=>{
+      if(script===COMMIT_LUA&&!race){race=true;await price(9000,5000);}
+      const result=await redis.eval<T>(script,keys,args);
+      if(script===COMMIT_LUA&&!(result as {committed:boolean}).committed)rejectedCAS=true;
+      return result;
+    }};
+    const b=await instance({executor});
+    expect(code(await b.checkout.complete(request(s)))).toBe("VERSION_CONFLICT");
+    expect(rejectedCAS).toBe(true);
+    expect(value(await a.checkout.read(s.session.id)).session.status).toBe("PRICE_REVIEW");
+    expect((await conserved(a)).sold).toBe(0);
+  });
+  it("keeps an absolute metadata TTL through reads, price changes and acknowledgements",async()=>{
+    const a=await instance();const s=await create(a);const key=a.store.sessionKey(s.session.id);
+    const before=Number(await redis.command("PTTL",key));await pause(40);
+    value(await a.checkout.read(s.session.id));await price(9000,4000);
+    const current=value(await a.checkout.read(s.session.id));
+    value(await a.checkout.acceptQuote({sessionId:s.session.id,expectedVersion:current.session.version,quoteVersion:current.session.quote.version}));
+    expect(Number(await redis.command("PTTL",key))).toBeLessThan(before-30);
+    expect(value(await a.checkout.read(s.session.id)).session.reservationExpiresAt).toBe(s.session.reservationExpiresAt);
+  });
+  it("physically collects abandoned checkout history without making TTL the hold authority",async()=>{
+    const a=await instance({policy:{holdMs:150,processingMs:50,retentionAfterExpiryMs:150},replayRetentionMs:100});
+    const s=await create(a);await redis.after(s.session.reservationExpiresAt);
+    expect(Number(await redis.command("EXISTS",a.store.sessionKey(s.session.id)))).toBe(1);
+    expect((await conserved(a)).available).toBe(8);
+    await redis.after(new Date(Date.parse(s.session.recoveryRetainUntil)+110).toISOString());
+    expect(await redis.command("EXISTS",a.store.sessionKey(s.session.id))).toBe("0");
+    expect(code(await a.checkout.complete(request(s)))).toBe("NOT_FOUND");
+    const inventory=JSON.parse(await redis.command("GET",a.store.inventoryKey(listing.id)));
+    expect(Object.keys(inventory.reservations)).toHaveLength(0);
+    expect(inventory.soldQuantity).toBe(0);
+    expect((await create(await instance())).session.id).not.toBe(s.session.id);
+  });
+  it("retains durable sales, one-order fences and authorized replay after actual metadata GC",async()=>{
+    const a=await instance({policy:{holdMs:200,processingMs:50,retentionAfterExpiryMs:150},replayRetentionMs:100});
+    const s=await create(a);const input=request(s);const done=value(await a.checkout.complete(input));
+    if(done.kind!=="COMPLETED")throw new Error();
+    const key=a.store.sessionKey(s.session.id);
+    await redis.after(new Date(Date.parse(s.session.recoveryRetainUntil)+110).toISOString());
+    expect(await redis.command("EXISTS",key)).toBe("0");const b=await instance();
+    expect(code(await b.checkout.read(s.session.id))).toBe("NOT_FOUND");
+    expect(value(await b.checkout.complete(input))).toEqual(done);
+    expect(code(await b.checkout.complete({...input,callerId:"other-device"}))).toBe("IDEMPOTENCY_CONFLICT");
+    expect(code(await b.checkout.complete({...input,idempotencyKey:"new-key"}))).toBe("TERMINAL_SESSION");
+    expect(code(await b.store.execute({kind:"RESERVE",sessionId:s.session.id,reservationId:randomUUID(),listingId:listing.id,allocation,expectedListingVersion:version(1)},DEFAULT_CHECKOUT_POLICY))).toBe("TERMINAL_SESSION");
+    expect(value(await b.checkout.confirm(done)).id).toBe(done.orderId);
+    expect(await conserved(b)).toEqual({total:8,held:0,sold:2,available:6});
+    expect(await redis.command("EXISTS",key)).toBe("0");
+    expect(await redis.command("TTL",b.store.receiptKey(s.session.id))).toBe("-1");
+    expect(await redis.command("TTL",b.store.orderKey(done.orderId))).toBe("-1");
+    const inventory=JSON.parse(await redis.command("GET",b.store.inventoryKey(listing.id)));
+    expect(Object.keys(inventory.reservations)).toHaveLength(0);expect(inventory.soldQuantity).toBe(2);expect(inventory.soldSeats).toEqual([9,10]);
+  });
+  it("keeps one recovery successor when its completed metadata is collected before the original",async()=>{
+    const a=await instance({policy:{holdMs:100,processingMs:50,retentionAfterExpiryMs:1500},replayRetentionMs:100});
+    const original=await create(a);await redis.after(original.session.reservationExpiresAt);
+    const b=await instance({policy:{holdMs:150,processingMs:50,retentionAfterExpiryMs:100},replayRetentionMs:100});
+    const first=value(await b.checkout.recoverExpiredSession({sessionId:original.session.id,intent:"FRESH_NAVIGATION",idempotencyKey:"recover-first"}));
+    if(first.kind!=="REDIRECT_CHECKOUT")throw new Error();
+    const successor=value(await b.checkout.read(first.sessionId));
+    value(await b.checkout.complete(request(successor)));
+    await redis.after(new Date(Date.parse(successor.session.recoveryRetainUntil)+110).toISOString());
+    expect(await redis.command("EXISTS",b.store.sessionKey(successor.session.id))).toBe("0");
+    const again=value(await a.checkout.recoverExpiredSession({sessionId:original.session.id,intent:"FRESH_NAVIGATION",idempotencyKey:"recover-again"}));
+    expect(again).toEqual(first);expect((await conserved(a)).sold).toBe(2);
+    expect(await redis.command("EXISTS",b.store.sessionKey(successor.session.id))).toBe("0");
+  });
+  it("compacts repeated abandoned reservations instead of accumulating inventory history",async()=>{
+    const a=await instance({policy:{...DEFAULT_CHECKOUT_POLICY,holdMs:75}});
+    for(let n=0;n<8;n++) {
+      const s=await create(a);await redis.after(s.session.reservationExpiresAt);
+      expect((await conserved(a)).available).toBe(8);
+      const inventory=JSON.parse(await redis.command("GET",a.store.inventoryKey(listing.id)));
+      expect(Object.keys(inventory.reservations)).toHaveLength(0);
+    }
+    expect(await redis.command("EXISTS",a.store.prefix+"checkouts:v1")).toBe("0");
+  });
+  it.each(["checkouts:v1",`inventory:${listing.eventId}`])("fails closed when legacy %s data would create duplicate stock",async(legacy)=>{
+    const prefix=`checkout:{${namespace}}:`;
+    await redis.command("SET",prefix+legacy,JSON.stringify({schemaVersion:1}));
+    await expect(instance()).rejects.toThrow(/Legacy v1 data/);
+    expect(await redis.command("EXISTS",prefix+"inventory:v2:"+listing.id)).toBe("0");
+    expect(JSON.parse(await redis.command("GET",prefix+legacy)).schemaVersion).toBe(1);
+  });
+
 });

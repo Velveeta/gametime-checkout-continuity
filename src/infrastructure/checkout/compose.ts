@@ -13,9 +13,10 @@ import { HmacCompletionAuthority } from "./completion-authority";
 
 /** Server composition shared by production and real-Redis integration tests. */
 export async function composeCheckout(options:{redis:RedisScriptExecutor;namespace:string;callerSecret:string;completionSecret:string;
-  secureCookies:boolean;payment?:Payment;policy?:CheckoutPolicy;analytics?:Analytics}) {
+  secureCookies:boolean;payment?:Payment;policy?:CheckoutPolicy;analytics?:Analytics;replayRetentionMs?:number}) {
   const seeds=new FixtureCatalog();
-  const store=new RedisCheckoutStore(options.redis,seeds,options.namespace);
+  const store=new RedisCheckoutStore(options.redis,seeds,options.namespace,
+    options.replayRetentionMs===undefined?undefined:{replayMs:options.replayRetentionMs});
   await store.initialize();
   const catalog={getEvent:seeds.getEvent.bind(seeds),listEvents:seeds.listEvents.bind(seeds),
     getListing:store.getListing.bind(store),listListings:store.listListings.bind(store)};
