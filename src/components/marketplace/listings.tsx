@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ResponsiveSelect } from '@/components/ui/responsive-select';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import {
@@ -108,39 +109,36 @@ function ListingCard({
       </div>
       {choices.length > 0 && (
         <div className="selection-controls">
-          <label>
-            Tickets
-            <select
-              value={quantity}
-              onChange={(e) => {
-                setQuantity(Number(e.target.value));
-                setSeats('');
-              }}
-              disabled={reserve.isPending}
-            >
-              {options.map((n) => (
-                <option value={n} key={n}>
-                  {n} {n === 1 ? 'ticket' : 'tickets'}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {listing.allocation.kind === 'ASSIGNED'
-              ? 'Seats together'
-              : 'Admission'}
-            <select
-              value={selected ? selectionKey(selected) : ''}
-              onChange={(e) => setSeats(e.target.value)}
-              disabled={reserve.isPending}
-            >
-              {choices.map((choice) => (
-                <option value={selectionKey(choice)} key={selectionKey(choice)}>
-                  {seatLabel(choice)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ResponsiveSelect
+            label="Tickets"
+            description="Choose how many tickets you'd like. All totals include fees."
+            value={String(quantity)}
+            options={options.map((n) => ({
+              value: String(n),
+              label: `${n} ${n === 1 ? 'ticket' : 'tickets'}`,
+              detail: `${money(quoteSelection(listing, n).total)} total, including fees`,
+            }))}
+            disabled={reserve.isPending || unavailable}
+            onValueChange={(value) => {
+              setQuantity(Number(value));
+              setSeats('');
+            }}
+          />
+          <ResponsiveSelect
+            label={
+              listing.allocation.kind === 'ASSIGNED'
+                ? 'Seats together'
+                : 'Admission'
+            }
+            description="Choose from the tickets currently available in this section."
+            value={selected ? selectionKey(selected) : ''}
+            options={choices.map((choice) => ({
+              value: selectionKey(choice),
+              label: seatLabel(choice),
+            }))}
+            disabled={reserve.isPending || unavailable}
+            onValueChange={setSeats}
+          />
         </div>
       )}
       <div className="listing-bottom">

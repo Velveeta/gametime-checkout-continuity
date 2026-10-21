@@ -267,14 +267,16 @@ test('separate carts see stock removed and automatically restored on expiry', as
     card.getByText('8 available · 0 reserved · 0 sold'),
   ).toBeVisible();
   await card
-    .getByLabel('Seats together')
+    .getByRole('combobox', { name: 'Seats together', exact: true })
     .selectOption({ label: 'Row 18 · Seats 13, 14' });
   const s = await shortCheckout(3500);
 
   await expect(
     card.getByText('6 available · 2 reserved · 0 sold'),
   ).toBeVisible();
-  await expect(card.getByLabel('Seats together')).toHaveValue(
+  await expect(
+    card.getByRole('combobox', { name: 'Seats together', exact: true }),
+  ).toHaveValue(
     selectionKey({
       kind: 'ASSIGNED',
       section: listing.allocation.section,
@@ -798,4 +800,225 @@ test('ticket availability errors disable cached reservations and empty responses
   await expect(
     card.getByRole('button', { name: 'Reserve tickets', exact: true }),
   ).toBeEnabled();
+});
+
+test('responsive selects use an accessible bottom drawer on mobile and submit the selected inventory', async ({
+  browser,
+}) => {
+  const { page, base } = await pageOn(browser, 0, true);
+
+  await page.goto(base + `/events/${listing.eventId}`);
+  const card = page.getByRole('article', {
+    name: listing.allocation.section,
+    exact: true,
+  });
+  const quantity = card.getByRole('button', {
+    name: 'Tickets 2 tickets',
+    exact: true,
+  });
+
+  await expect(card.getByRole('combobox')).toHaveCount(0);
+  await quantity.click();
+  const drawer = page.getByRole('dialog', {
+    name: 'Choose tickets',
+    exact: true,
+  });
+
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole('radio', { name: /^2 tickets/ })).toBeFocused();
+  await drawer.getByRole('radio', { name: /^3 tickets/ }).check();
+  await expect(drawer.getByRole('radio', { name: /^3 tickets/ })).toBeChecked();
+  const bounds = await drawer.boundingBox();
+
+  expect(bounds!.x).toBe(0);
+  expect(bounds!.width).toBeLessThanOrEqual(390);
+  expect(bounds!.y + bounds!.height).toBeCloseTo(844, 0);
+  await page.screenshot({ path: 'test-results/select-mobile.png' });
+  await drawer.getByRole('button', { name: 'Done', exact: true }).click();
+  const updated = card.getByRole('button', {
+    name: 'Tickets 3 tickets',
+    exact: true,
+  });
+
+  await expect(updated).toBeFocused();
+  await card.getByRole('button', { name: /^Seats together/ }).click();
+  const seats = page.getByRole('dialog', {
+    name: 'Choose seats together',
+    exact: true,
+  });
+  const alternative = seats.getByRole('radio').nth(1);
+  const selectedKey = await alternative.inputValue();
+
+  await alternative.check();
+  await page.keyboard.press('Escape');
+  await expect(seats).not.toBeVisible();
+  await expect(
+    card.getByRole('button', { name: /^Seats together/ }),
+  ).toBeFocused();
+  const reservation = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/checkouts' &&
+      response.request().method() === 'POST',
+  );
+
+  await card
+    .getByRole('button', { name: 'Reserve tickets', exact: true })
+    .click();
+  const response = await reservation;
+  const payload = await response.json();
+
+  expect(response.ok()).toBe(true);
+  expect(selectionKey(payload.data.session.allocation)).toBe(selectedKey);
+  await expect(page).toHaveURL(/\/checkout\//);
+  await expect(page.getByTestId('order-total')).toHaveText('$342');
+});
+
+test('responsive selects retain native desktop selection and share values across viewport changes', async ({
+  browser,
+}) => {
+  const { page, base } = await pageOn(browser);
+
+  await page.goto(base + `/events/${listing.eventId}`);
+  const card = page.getByRole('article', {
+    name: listing.allocation.section,
+    exact: true,
+  });
+
+  await expect(card.getByRole('combobox')).toHaveCount(2);
+  await card
+    .getByRole('combobox', { name: 'Tickets', exact: true })
+    .selectOption('3');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await card
+    .getByRole('button', { name: 'Tickets 3 tickets', exact: true })
+    .click();
+  const drawer = page.getByRole('dialog', {
+    name: 'Choose tickets',
+    exact: true,
+  });
+
+  await drawer.getByRole('radio', { name: /^4 tickets/ }).check();
+  await drawer.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect(
+    card.getByRole('combobox', { name: 'Tickets', exact: true }),
+  ).toHaveValue('4');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('mobile select drawers scroll with touch while the heading and Done button stay visible', async ({
+  browser,
+}) => {
+  const { page, base } = await pageOn(browser, 0, true);
+
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.goto(base + `/events/${listing.eventId}`);
+  const card = page.getByRole('article', {
+    name: listing.allocation.section,
+    exact: true,
+  });
+
+  await card
+    .getByRole('button', { name: 'Tickets 2 tickets', exact: true })
+    .click();
+  const quantity = page.getByRole('dialog', {
+    name: 'Choose tickets',
+    exact: true,
+  });
+
+  await quantity.getByRole('radio', { name: /^1 ticket / }).check();
+  await quantity.getByRole('button', { name: 'Done', exact: true }).click();
+  await card.getByRole('button', { name: /^Seats together/ }).click();
+  const drawer = page.getByRole('dialog', {
+    name: 'Choose seats together',
+    exact: true,
+  });
+  const scroller = drawer.locator('.responsive-select-scroll');
+  const done = drawer.getByRole('button', { name: 'Done', exact: true });
+  const last = drawer.getByRole('radio', {
+    name: 'Row 18 · Seat 16',
+    exact: true,
+  });
+
+  await expect
+    .poll(() =>
+      scroller.evaluate(
+        (element) => element.scrollHeight > element.clientHeight,
+      ),
+    )
+    .toBe(true);
+  await drawer.evaluate(async (element) => {
+    await Promise.all(
+      element.getAnimations().map((animation) => animation.finished),
+    );
+  });
+  const footerBefore = await done.boundingBox();
+  const pageScroll = await page.evaluate(() => window.scrollY);
+  const scrollBounds = await scroller.boundingBox();
+
+  await page.mouse.move(
+    scrollBounds!.x + scrollBounds!.width / 2,
+    scrollBounds!.y + scrollBounds!.height / 2,
+  );
+  await page.mouse.wheel(0, 240);
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await page.mouse.wheel(0, -1000);
+  await expect
+    .poll(() => scroller.evaluate((element) => element.scrollTop))
+    .toBe(0);
+  const cdp = await page.context().newCDPSession(page);
+
+  try {
+    for (let swipe = 0; swipe < 3; swipe++) {
+      const bounds = await scroller.boundingBox();
+      const x = bounds!.x + bounds!.width / 2;
+      const start = bounds!.y + bounds!.height - 15;
+      const end = bounds!.y + 15;
+
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x, y: start }],
+      });
+
+      for (let step = 1; step <= 8; step++) {
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x, y: start + ((end - start) * step) / 8 }],
+        });
+      }
+
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      });
+    }
+
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    await expect(last).toBeInViewport();
+    await expect(
+      drawer.getByRole('heading', { name: 'Choose seats together' }),
+    ).toBeInViewport();
+    const footerAfter = await done.boundingBox();
+    const lastRow = await last.locator('..').boundingBox();
+
+    expect(footerAfter!.y).toBeCloseTo(footerBefore!.y, 0);
+    expect(footerAfter!.y + footerAfter!.height).toBeLessThanOrEqual(600);
+    expect(lastRow!.y + lastRow!.height).toBeLessThanOrEqual(footerAfter!.y);
+    expect(await page.evaluate(() => window.scrollY)).toBe(pageScroll);
+    await page.screenshot({ path: 'test-results/select-mobile-scrolled.png' });
+    await last.check();
+    await done.click();
+    await expect(
+      card.getByRole('button', {
+        name: 'Seats together Row 18 · Seat 16',
+        exact: true,
+      }),
+    ).toBeFocused();
+  } finally {
+    await cdp.detach();
+  }
 });

@@ -293,6 +293,14 @@ export class RedisCheckoutStore implements StoreContracts {
           index.orders[document.order.id] = document.order;
           index.digests[document.order.id] = document.digest;
         } else {
+          // Restore empty reservation dictionaries before adding keyed holds.
+          if (
+            Array.isArray(document.reservations) &&
+            document.reservations.length === 0
+          ) {
+            document.reservations = {};
+          }
+
           // Redis cjson emits an empty Lua table as {}, even for JSON arrays.
           if (
             !Array.isArray(document.soldSeats) &&
@@ -310,6 +318,7 @@ export class RedisCheckoutStore implements StoreContracts {
             key !== this.inventoryKey(listing.id) ||
             document.eventId !== listing.eventId ||
             !document.reservations ||
+            Array.isArray(document.reservations) ||
             !Number.isSafeInteger(document.soldQuantity) ||
             document.soldQuantity < 0 ||
             !Array.isArray(document.soldSeats)
@@ -691,7 +700,8 @@ export class RedisCheckoutStore implements StoreContracts {
         expected: s.raw,
         observedAt: s.nowMs,
         validBefore,
-        values: s.keys.map((key) => values.get(key) ?? null),
+        // Preserve positions even when a hosted Lua decoder drops JSON nulls.
+        values: s.keys.map((key) => values.get(key) ?? false),
         changed: s.keys.map(
           (key) =>
             values.has(key) &&
