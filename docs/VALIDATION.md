@@ -9,24 +9,24 @@ are distinguished below.
 
 ## Commands and results
 
-| Command                                         | Result                                         | Scope                                                                              |
-| ----------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `npm ci`                                        | Passed, 461 packages installed                 | Clean lockfile installation                                                        |
-| `npm run format`                                | Passed                                         | ESLint brace/spacing fixes followed by Prettier                                    |
-| `npm run format:check`                          | Passed                                         | Supplied 80-column formatting configuration                                        |
-| `npm run lint`                                  | Passed, zero warnings                          | Includes required braces/1TBS and section spacing                                  |
-| `npm run typecheck`                             | Passed                                         | Next route types and strict TypeScript                                             |
-| `npm test`                                      | 123 passed across 12 files                     | Pure domain, deterministic application models and adapter/helper contracts         |
-| `npm run test:integration`                      | 70 passed                    | Actual disposable Redis, production Lua/SDK adapters and HTTP application adapters |
-| `npm run build`                                 | Passed                                         | Production Next.js build; dynamic checkout/event routes                            |
-| `npm run test:http`                             | One passed                                     | Built server routes over HTTP with real Redis behind the REST bridge               |
-| `npm run test:browser`                          | 27 passed                                      | 22 checkout and five developer-menu journeys in Chromium                           |
-| `npm run check` | Passed during original Wave 06 validation | Complete local gate; subsequent fixes validated separately |
-| `npm audit --omit=dev --json`                   | Zero production vulnerabilities                | Audit at validation time                                                           |
-| `npm audit --json`                              | Five high advisories, development dependencies | Existing `braces` → lint-toolchain dependency chain; see below                     |
-| Hosted Upstash tests | Two passed, confirmed by the project owner | Hosted SDK/EVAL transport, competing claims, completion/replay, deadlines and reset |
-| GitHub Actions | Remote result not recorded here | Workflow configured; inspect the repository Actions tab for current status |
-| Deployed smoke tests | Manual deployed-app testing confirmed by the project owner | Vercel application exercised; no automated deployed-site E2E run claimed |
+| Command                       | Result                                                     | Scope                                                                               |
+| ----------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `npm ci`                      | Passed, 461 packages installed                             | Clean lockfile installation                                                         |
+| `npm run format`              | Passed                                                     | ESLint brace/spacing fixes followed by Prettier                                     |
+| `npm run format:check`        | Passed                                                     | Supplied 80-column formatting configuration                                         |
+| `npm run lint`                | Passed, zero warnings                                      | Includes required braces/1TBS and section spacing                                   |
+| `npm run typecheck`           | Passed                                                     | Next route types and strict TypeScript                                              |
+| `npm test`                    | 123 passed across 12 files                                 | Pure domain, deterministic application models and adapter/helper contracts          |
+| `npm run test:integration`    | 70 passed                                                  | Actual disposable Redis, production Lua/SDK adapters and HTTP application adapters  |
+| `npm run build`               | Passed                                                     | Production Next.js build; dynamic checkout/event routes                             |
+| `npm run test:http`           | One passed                                                 | Built server routes over HTTP with real Redis behind the REST bridge                |
+| `npm run test:browser`        | 27 passed                                                  | 22 checkout and five developer-menu journeys in Chromium                            |
+| `npm run check`               | Passed during original Wave 06 validation                  | Complete local gate; subsequent fixes validated separately                          |
+| `npm audit --omit=dev --json` | Zero production vulnerabilities                            | Audit at validation time                                                            |
+| `npm audit --json`            | Five high advisories, development dependencies             | Existing `braces` → lint-toolchain dependency chain; see below                      |
+| Hosted Upstash tests          | Two passed, confirmed by the project owner                 | Hosted SDK/EVAL transport, competing claims, completion/replay, deadlines and reset |
+| GitHub Actions                | Remote result not recorded here                            | Workflow configured; inspect the repository Actions tab for current status          |
+| Deployed smoke tests          | Manual deployed-app testing confirmed by the project owner | Vercel application exercised; no automated deployed-site E2E run claimed            |
 
 The latest recorded passing local suite counts total **221 tests**:
 123 unit, 70 integration, one built HTTP, and 27 browser tests. These results

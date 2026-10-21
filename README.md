@@ -20,16 +20,16 @@ npm run dev
 
 Open [localhost:3000](http://localhost:3000). Discovery can render before Redis is configured; ticket reservations and checkout require the Redis configuration. A local TCP Redis installation alone does not satisfy the app's HTTPS REST client. Local integration tests launch their own Redis; the running app uses Upstash.
 
-| Server variable | Value |
-| --- | --- |
-| `UPSTASH_REDIS_REST_URL` | Your account-owned Upstash database's HTTPS REST endpoint |
-| `UPSTASH_REDIS_REST_TOKEN` | Its read/write REST token, not a read-only token |
-| `CHECKOUT_NAMESPACE` | Stable isolated namespace, e.g. `gametime-local` |
-| `CHECKOUT_CALLER_SECRET` | Random secret, at least 32 characters |
-| `CHECKOUT_COMPLETION_SECRET` | A different random secret, at least 32 characters |
-| `DEMO_MODE` | `false`; set `true` to enable guarded assessor controls |
-| `DEMO_SECRET` | Separate random secret, at least 32 characters; required in demo mode |
-| `PAYMENT_SCENARIO` | `SUCCESS` by default; alternative base scenarios require demo mode |
+| Server variable              | Value                                                                 |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `UPSTASH_REDIS_REST_URL`     | Your account-owned Upstash database's HTTPS REST endpoint             |
+| `UPSTASH_REDIS_REST_TOKEN`   | Its read/write REST token, not a read-only token                      |
+| `CHECKOUT_NAMESPACE`         | Stable isolated namespace, e.g. `gametime-local`                      |
+| `CHECKOUT_CALLER_SECRET`     | Random secret, at least 32 characters                                 |
+| `CHECKOUT_COMPLETION_SECRET` | A different random secret, at least 32 characters                     |
+| `DEMO_MODE`                  | `false`; set `true` to enable guarded assessor controls               |
+| `DEMO_SECRET`                | Separate random secret, at least 32 characters; required in demo mode |
+| `PAYMENT_SCENARIO`           | `SUCCESS` by default; alternative base scenarios require demo mode    |
 
 Generate each secret independently with `openssl rand -hex 32`. Put values only in the ignored root `.env.local` or hosting environment settings. Never prefix credentials with `NEXT_PUBLIC_`, embed them in source, or commit the populated file. Keep namespaces and signing secrets stable across instances/redeploys; isolate local, Preview, and Production data. Missing/invalid runtime settings fail closed.
 
@@ -62,15 +62,15 @@ flowchart TD
 
 ### Checkout session state model
 
-| State | Allowed next behavior |
-| --- | --- |
-| `ACTIVE` | Acknowledge changed price, claim payment, or expire |
-| `PRICE_REVIEW` | Accept exact current quote; payment remains blocked |
-| `PROCESSING` | Settle the claimed attempt or fence it at processing timeout |
-| `PAYMENT_RETRYABLE` | Explicit new attempt while hold is live; at most three total |
-| `PAYMENT_FAILED` | Terminal decline, exhaustion, or processing timeout; release stock |
-| `EXPIRED` | Mounted page leaves; fresh navigation may create one new successor |
-| `COMPLETED` | One durable order; only the completing caller/key obtains confirmation |
+| State               | Allowed next behavior                                                  |
+| ------------------- | ---------------------------------------------------------------------- |
+| `ACTIVE`            | Acknowledge changed price, claim payment, or expire                    |
+| `PRICE_REVIEW`      | Accept exact current quote; payment remains blocked                    |
+| `PROCESSING`        | Settle the claimed attempt or fence it at processing timeout           |
+| `PAYMENT_RETRYABLE` | Explicit new attempt while hold is live; at most three total           |
+| `PAYMENT_FAILED`    | Terminal decline, exhaustion, or processing timeout; release stock     |
+| `EXPIRED`           | Mounted page leaves; fresh navigation may create one new successor     |
+| `COMPLETED`         | One durable order; only the completing caller/key obtains confirmation |
 
 Reservations immediately exclude stock from other carts. An atomic claim validates ownership, session/quote versions, acknowledgement, inventory, and time. Claims before expiry protect payment independently of the original countdown. Ordinary reads/retries never extend a hold. Successful settlement atomically sells inventory and writes the order plus a permanent session-level completion receipt.
 
